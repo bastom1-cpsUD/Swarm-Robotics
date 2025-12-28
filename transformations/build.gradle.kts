@@ -34,7 +34,7 @@ java {
 
 application {
     // Define the main class for the application.
-    mainClass.set("org.Graphs.Graph")
+    mainClass.set("org.Transformations.Transformation2D")
 }
 
 
@@ -45,10 +45,11 @@ tasks.named<Test>("test") {
 
 tasks.jar {
     manifest {
-        attributes("Main-Class" to "org.Graphs.Graph")
+        attributes("Main-Class" to "org.Transformations.Transformation2D")
     }
 }
 
-
-
+tasks.withType<JavaCompile> {
+    modularity.inferModulePath.set(false)
+}
 

@@ -12,3 +12,4 @@ plugins {
 
 rootProject.name = "Swarm-Robotics"
 include("app")
+include("transformations")
