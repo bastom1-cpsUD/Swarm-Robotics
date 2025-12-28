@@ -1,0 +1,6 @@
+{
+    "java.compile.nullAnalysis.mode": "disabled",
+    "workbench.editor.enablePreview": false,
+    "explorer.compactFolders": false,
+    "java.configuration.updateBuildConfiguration": "automatic"
+}
