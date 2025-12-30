@@ -11,5 +11,7 @@ plugins {
 }
 
 rootProject.name = "Swarm-Robotics"
-include("app")
-include("transformations")
+include("Graphs")
+include("Transformations")
+include("Lattice-Robots")
+

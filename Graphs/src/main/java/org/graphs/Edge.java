@@ -1,4 +1,4 @@
-package org.Graphs;
+package org.graphs;
 
 public interface Edge {
     Node<?> getFromNode();

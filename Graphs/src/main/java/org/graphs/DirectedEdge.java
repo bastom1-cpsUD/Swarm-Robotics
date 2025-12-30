@@ -1,4 +1,4 @@
-package org.Graphs;
+package org.graphs;
 
 public class DirectedEdge implements Edge{
     // Learn Graddle, Maven

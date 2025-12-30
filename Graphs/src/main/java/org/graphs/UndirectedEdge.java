@@ -1,4 +1,4 @@
-package org.Graphs;
+package org.graphs;
 
 public class UndirectedEdge implements Edge {
     

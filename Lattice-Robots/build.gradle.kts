@@ -8,7 +8,6 @@
 plugins {
     // Apply the application plugin to add support for building a CLI application in Java.
     application
-    "java-library"
 }
 
 repositories {
@@ -24,6 +23,8 @@ dependencies {
 
     // This dependency is used by the application.
     implementation(libs.guava)
+
+    implementation(project(":Transformations"))
 }
 
 // Apply a specific Java toolchain to ease working on different environments.
@@ -35,7 +36,7 @@ java {
 
 application {
     // Define the main class for the application.
-    mainClass.set("org.Transformations.Transformation2D")
+    mainClass.set("org.robots.LatticeRobot")
 }
 
 
@@ -46,11 +47,7 @@ tasks.named<Test>("test") {
 
 tasks.jar {
     manifest {
-        attributes("Main-Class" to "org.transformations.Transformation2D")
+        attributes("Main-Class" to "org.robots.LatticeRobot")
     }
-}
-
-tasks.withType<JavaCompile> {
-    modularity.inferModulePath.set(false)
 }
 

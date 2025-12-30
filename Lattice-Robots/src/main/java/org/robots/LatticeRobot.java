@@ -1,42 +1,59 @@
-package org.transformations;
+package org.robots;
 
-import java.awt.Color;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.Collections;
 import java.awt.Graphics2D;
-import java.awt.Polygon;
+import java.awt.Color;
 import java.awt.RenderingHints;
 import java.awt.geom.Path2D;
+import org.transformations.OrientedPoint;
 
-/**
- * A simple Robot class representing a robot with position and orientation.
- */
-public class Robot {
-    
-    /**
-     * The position of the robot represented as an OrientedPoint (x, y, orientation).
-     */
-    private OrientedPoint position;
-    
-    /**
-     * Constructor to initialize the robot's position and orientation.
-     * @param x The x-coordinate of the robot's position.
-     * @param y The y-coordinate of the robot's position.
-     * @param orientation The orientation of the robot in radians.
-     */
-    public Robot(double x, double y, double orientation) {
-        this.position = new OrientedPoint(x, y, orientation);
+public class LatticeRobot {
+    //Robot unique identifier
+    private final int AuthorityId;
+    private final OrientedPoint position;
+
+    //Local knowledge & edges
+    private Set<LatticeRobot> neighbors;
+    private Set<Edge> edges;
+
+    public LatticeRobot(int authorityId, OrientedPoint position) {
+        this.AuthorityId = authorityId;
+        this.position = position;
+        this.neighbors = new HashSet<>();
+        this.edges = new HashSet<>();
+    }
+
+    public void addNeighbor(LatticeRobot neighbor) {
+        this.neighbors.add(neighbor);
+        this.edges.add(new Edge(this, neighbor));
+    }
+
+    public void removeNeighbor(LatticeRobot neighbor) {
+        this.neighbors.remove(neighbor);
+        this.edges.removeIf(edge -> edge.getTo() == neighbor);
+    }
+
+    public int getAuthorityId() {
+        return AuthorityId;
     }
 
     public OrientedPoint getPosition() {
         return position;
     }
 
-    public void setPosition(OrientedPoint position) {
-        this.position = position;
+    public Set<LatticeRobot> getNeighbors() {
+        return Collections.unmodifiableSet(neighbors);
+    }
+
+    public Set<Edge> getEdges() {
+        return Collections.unmodifiableSet(edges);
     }
 
     public void draw(Graphics2D g2d) {
         // Drawing logic for the robot
-        double s = 80.0;
+        double s = 40.0;
         double R = s / Math.sqrt(3.0);
         double theta0 = position.getOrientation();
         long[] xcoords = new long[4];
@@ -74,5 +91,8 @@ public class Robot {
         g2d.setColor(Color.BLACK);
         g2d.fill(shape);
     }
-}
 
+    public static void main(String[] args) {
+        System.out.println("LatticeRobot module works!");
+    }
+}

@@ -34,7 +34,7 @@ java {
 
 application {
     // Define the main class for the application.
-    mainClass.set("org.Graphs.Graph")
+    mainClass.set("org.graphs.Graph")
 }
 
 
@@ -45,7 +45,7 @@ tasks.named<Test>("test") {
 
 tasks.jar {
     manifest {
-        attributes("Main-Class" to "org.Graphs.Graph")
+        attributes("Main-Class" to "org.graphs.Graph")
     }
 }
 
