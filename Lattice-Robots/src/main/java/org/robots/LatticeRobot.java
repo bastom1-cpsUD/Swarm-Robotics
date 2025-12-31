@@ -2,6 +2,7 @@ package org.robots;
 
 import java.util.Set;
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.Collections;
 import java.awt.Graphics2D;
 import java.awt.Color;
@@ -25,14 +26,23 @@ public class LatticeRobot {
         this.edges = new HashSet<>();
     }
 
-    public void addNeighbor(LatticeRobot neighbor) {
-        this.neighbors.add(neighbor);
-        this.edges.add(new Edge(this, neighbor));
+    public void addNeighbor(LatticeRobot other) {
+        this.neighbors.add(other);
+        other.neighbors.add(this); // Ensure bidirectional connection
+        this.edges.add(new Edge(this, other));
     }
 
     public void removeNeighbor(LatticeRobot neighbor) {
         this.neighbors.remove(neighbor);
         this.edges.removeIf(edge -> edge.getTo() == neighbor);
+    }
+
+    public String listNeighbors() {
+        String result = "";
+        for(LatticeRobot neighbor : neighbors) {
+            result += neighbor.toString() + "\n";
+        }
+        return result;
     }
 
     public int getAuthorityId() {
@@ -49,6 +59,24 @@ public class LatticeRobot {
 
     public Set<Edge> getEdges() {
         return Collections.unmodifiableSet(edges);
+    }
+
+    @Override
+    public String toString() {
+        return "LatticeRobot[ID=" + AuthorityId + ", Position=" + position + "]";
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (!(obj instanceof LatticeRobot)) return false;
+        LatticeRobot other = (LatticeRobot) obj;
+        return AuthorityId == other.AuthorityId;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(AuthorityId);
     }
 
     public void draw(Graphics2D g2d) {
@@ -93,6 +121,67 @@ public class LatticeRobot {
     }
 
     public static void main(String[] args) {
-        System.out.println("LatticeRobot module works!");
+        //Create 5 sample robots and connect them
+        LatticeRobot robot1 = new LatticeRobot(1, new OrientedPoint(100, 100, 0));
+        LatticeRobot robot2 = new LatticeRobot(2, new OrientedPoint(250, 150, Math.PI / 4));
+        LatticeRobot robot3 = new LatticeRobot(3, new OrientedPoint(150, 250, Math.PI / 2));
+        LatticeRobot robot4 = new LatticeRobot(4, new OrientedPoint(300, 200, Math.PI));
+
+        //Add neighbors for robot 1
+        robot1.addNeighbor(robot2);
+        robot1.addNeighbor(robot3);
+        robot1.addNeighbor(robot4);
+
+        //Add neighbors for robot 2
+        robot2.addNeighbor(robot4);
+
+        //Add neighbors for robot 3
+        robot3.addNeighbor(robot4); //Note: bidirectional connection ensured in addNeighbor
+
+
+        //Print robot details
+        System.out.println("Robot 1 ID: " + robot1.getAuthorityId());
+        System.out.println("Robot 1 Position: " + robot1.getPosition());
+        System.out.println("Robot 1 Neighbors: " + robot1.listNeighbors());
+
+        System.out.println("Robot 2 ID: " + robot2.getAuthorityId());
+        System.out.println("Robot 2 Position: " + robot2.getPosition());
+        System.out.println("Robot 2 Neighbors: " + robot2.listNeighbors());
+
+        //Create simple javaFX application to visualize robots and edge
+        javax.swing.JFrame frame = new javax.swing.JFrame("Lattice Robots Visualization");
+        frame.setSize(400, 400);
+        frame.setDefaultCloseOperation(javax.swing.JFrame.EXIT_ON_CLOSE);
+
+        javax.swing.JPanel panel = new javax.swing.JPanel() {
+            @Override
+            protected void paintComponent(java.awt.Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2d = (Graphics2D) g;
+                
+                for(Edge edge : robot1.getEdges()) {
+                    edge.draw(g2d);
+                }
+                for(Edge edge : robot2.getEdges()) {
+                    edge.draw(g2d);
+                }
+                for(Edge edge : robot3.getEdges()) {
+                    edge.draw(g2d);
+                }
+                for(Edge edge : robot4.getEdges()) {
+                    edge.draw(g2d);
+                }
+
+                robot1.draw(g2d);
+                robot2.draw(g2d);
+                robot3.draw(g2d);
+                robot4.draw(g2d);
+            }
+        };
+
+        frame.add(panel);
+
+        frame.setVisible(true);
+
     }
 }
