@@ -1,4 +1,4 @@
-package org.transformations;
+package org.Transformations;
 
 import javax.swing.JFrame;
 import javax.swing.JPanel;

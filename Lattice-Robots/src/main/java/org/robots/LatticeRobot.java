@@ -8,7 +8,7 @@ import java.awt.Graphics2D;
 import java.awt.Color;
 import java.awt.RenderingHints;
 import java.awt.geom.Path2D;
-import org.transformations.OrientedPoint;
+import org.Transformations.OrientedPoint;
 
 public class LatticeRobot {
     //Robot unique identifier

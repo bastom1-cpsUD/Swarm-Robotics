@@ -1,4 +1,4 @@
-package org.transformations;
+package org.Transformations;
 /**
  * An extension of Point2D.Double that includes an orientation (angle in radians).
  */
@@ -44,5 +44,4 @@ public class OrientedPoint extends java.awt.geom.Point2D.Double {
     public String toString() {
         return "OrientedPoint[x: " + x + ", y: " + y + ", orientation (radians): " + orientation + ", orientation (degrees): " + getOrientationInDegrees() + "]";
     }
-    
 }
