@@ -46,8 +46,16 @@ tasks.named<Test>("test") {
 }
 
 tasks.jar {
+
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
     manifest {
         attributes("Main-Class" to "org.robots.LatticeRobot")
     }
+    from({
+        configurations.runtimeClasspath.get().map { file ->
+            if (file.isDirectory) file else zipTree(file)
+        }
+    })
 }
 
