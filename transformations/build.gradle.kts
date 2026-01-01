@@ -35,7 +35,7 @@ java {
 
 application {
     // Define the main class for the application.
-    mainClass.set("org.Transformations.Transformation2D")
+    mainClass.set("org.transformations.Transformation2D")
 }
 
 
