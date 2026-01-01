@@ -1,4 +1,4 @@
-package org.Transformations;
+package org.transformations;
 
 import java.awt.Color;
 import java.awt.Graphics2D;

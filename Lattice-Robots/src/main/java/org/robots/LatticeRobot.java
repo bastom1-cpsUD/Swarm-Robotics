@@ -7,17 +7,19 @@ import java.util.Collections;
 import java.awt.Graphics2D;
 import java.awt.Color;
 import java.awt.RenderingHints;
-import java.awt.geom.Path2D;
-import org.Transformations.OrientedPoint;
+import org.transformations.OrientedPoint;
+import java.awt.Polygon;
 
-public class LatticeRobot {
+public class LatticeRobot extends Polygon {
     //Robot unique identifier
     private final int AuthorityId;
-    private final OrientedPoint position;
+    private OrientedPoint position;
 
     //Local knowledge & edges
     private Set<LatticeRobot> neighbors;
     private Set<Edge> edges;
+    protected double offsetX;
+    protected double offsetY;
 
     public LatticeRobot(int authorityId, OrientedPoint position) {
         this.AuthorityId = authorityId;
@@ -53,6 +55,10 @@ public class LatticeRobot {
         return position;
     }
 
+    public void setPosition(OrientedPoint position) {
+        this.position = position;
+    }
+
     public Set<LatticeRobot> getNeighbors() {
         return Collections.unmodifiableSet(neighbors);
     }
@@ -80,108 +86,48 @@ public class LatticeRobot {
     }
 
     public void draw(Graphics2D g2d) {
-        // Drawing logic for the robot
+        updatePolygon();
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.setColor(Color.BLACK);
+        g2d.fill(this);
+    }
+
+    private void updatePolygon() {
+        // Update polygon points based on current position and orientation
         double s = 40.0;
         double R = s / Math.sqrt(3.0);
         double theta0 = position.getOrientation();
-        long[] xcoords = new long[4];
-        long[] ycoords = new long[4]; 
+        int[] xcoords = new int[4];
+        int[] ycoords = new int[4]; 
         //Calculate first triangle vertices
         double radius = R * 1.20;
         double angle = theta0; // 0 angle for the first vertex 
-        xcoords[0] =  Math.round(position.x + radius * Math.cos(angle));
-        ycoords[0] =  Math.round(position.y + radius * Math.sin(angle)); 
+        xcoords[0] =  (int) Math.round(position.x + radius * Math.cos(angle));
+        ycoords[0] =  (int) Math.round(position.y + radius * Math.sin(angle)); 
         //Calculate second triangle vertices
         angle = theta0 + 2 * Math.PI / 3.0; // 120 degrees or 2π/3 radians
-        xcoords[1] =  Math.round(position.x + R * Math.cos(angle));
-        ycoords[1] =  Math.round(position.y + R * Math.sin(angle)); 
+        xcoords[1] =  (int) Math.round(position.x + R * Math.cos(angle));
+        ycoords[1] =  (int) Math.round(position.y + R * Math.sin(angle)); 
         //Calculate third vertice (for flag like tail)
         radius = R * 0.1;
         angle = theta0 + Math.PI; /// 180 degrees or π radians 
-        xcoords[2] =  Math.round(position.x + radius * Math.cos(angle));
-        ycoords[2] =  Math.round(position.y + radius * Math.sin(angle)); 
+        xcoords[2] =  (int) Math.round(position.x + radius * Math.cos(angle));
+        ycoords[2] =  (int) Math.round(position.y + radius * Math.sin(angle)); 
         //Calculate fourth triangle vertices
         angle = theta0 + 4 * Math.PI / 3.0; // 240 degrees or 4π/3 radians
-        xcoords[3] =  Math.round(position.x + R * Math.cos(angle));
-        ycoords[3] =  Math.round(position.y + R * Math.sin(angle));
+        xcoords[3] =  (int) Math.round(position.x + R * Math.cos(angle));
+        ycoords[3] =  (int) Math.round(position.y + R * Math.sin(angle));
 
-        //Enable anti-aliasing for smoother rendering
-        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        this.reset();
+        for(int i = 0; i < xcoords.length; i++) {
+            this.addPoint(xcoords[i], ycoords[i]);
+        }
 
-        //Draw the robot as a filled polygon
-        Path2D.Double shape = new Path2D.Double();
-        shape.moveTo(xcoords[0], ycoords[0]);
-        shape.lineTo(xcoords[1], ycoords[1]);
-        shape.lineTo(xcoords[2], ycoords[2]);
-        shape.lineTo(xcoords[3], ycoords[3]);
-        shape.closePath();
-
-        g2d.setColor(Color.BLACK);
-        g2d.fill(shape);
     }
 
-    public static void main(String[] args) {
-        //Create 5 sample robots and connect them
-        LatticeRobot robot1 = new LatticeRobot(1, new OrientedPoint(100, 100, 0));
-        LatticeRobot robot2 = new LatticeRobot(2, new OrientedPoint(250, 150, Math.PI / 4));
-        LatticeRobot robot3 = new LatticeRobot(3, new OrientedPoint(150, 250, Math.PI / 2));
-        LatticeRobot robot4 = new LatticeRobot(4, new OrientedPoint(300, 200, Math.PI));
-
-        //Add neighbors for robot 1
-        robot1.addNeighbor(robot2);
-        robot1.addNeighbor(robot3);
-        robot1.addNeighbor(robot4);
-
-        //Add neighbors for robot 2
-        robot2.addNeighbor(robot4);
-
-        //Add neighbors for robot 3
-        robot3.addNeighbor(robot4); //Note: bidirectional connection ensured in addNeighbor
-
-
-        //Print robot details
-        System.out.println("Robot 1 ID: " + robot1.getAuthorityId());
-        System.out.println("Robot 1 Position: " + robot1.getPosition());
-        System.out.println("Robot 1 Neighbors: " + robot1.listNeighbors());
-
-        System.out.println("Robot 2 ID: " + robot2.getAuthorityId());
-        System.out.println("Robot 2 Position: " + robot2.getPosition());
-        System.out.println("Robot 2 Neighbors: " + robot2.listNeighbors());
-
-        //Create simple javaFX application to visualize robots and edge
-        javax.swing.JFrame frame = new javax.swing.JFrame("Lattice Robots Visualization");
-        frame.setSize(400, 400);
-        frame.setDefaultCloseOperation(javax.swing.JFrame.EXIT_ON_CLOSE);
-
-        javax.swing.JPanel panel = new javax.swing.JPanel() {
-            @Override
-            protected void paintComponent(java.awt.Graphics g) {
-                super.paintComponent(g);
-                Graphics2D g2d = (Graphics2D) g;
-                
-                for(Edge edge : robot1.getEdges()) {
-                    edge.draw(g2d);
-                }
-                for(Edge edge : robot2.getEdges()) {
-                    edge.draw(g2d);
-                }
-                for(Edge edge : robot3.getEdges()) {
-                    edge.draw(g2d);
-                }
-                for(Edge edge : robot4.getEdges()) {
-                    edge.draw(g2d);
-                }
-
-                robot1.draw(g2d);
-                robot2.draw(g2d);
-                robot3.draw(g2d);
-                robot4.draw(g2d);
-            }
-        };
-
-        frame.add(panel);
-
-        frame.setVisible(true);
-
+    @Override
+    public boolean contains(int x, int y) {
+        updatePolygon();
+        return super.contains(x, y);
     }
 }

@@ -27,7 +27,7 @@ public class Edge {
     public void draw(Graphics2D g2d) {
         Point2D pFrom = from.getPosition();
         Point2D pTo = to.getPosition();
-        g2d.setColor(java.awt.Color.GRAY);
+        g2d.setColor(java.awt.Color.black);
         g2d.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
         
         Path2D edge = new java.awt.geom.Path2D.Double();
