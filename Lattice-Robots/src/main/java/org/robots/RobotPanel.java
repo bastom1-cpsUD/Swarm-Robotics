@@ -27,6 +27,7 @@ public class RobotPanel extends JPanel {
         LatticeRobot robot3 = new LatticeRobot(3, new OrientedPoint(150, 250, Math.PI / 2));
         LatticeRobot robot4 = new LatticeRobot(4, new OrientedPoint(300, 200, Math.PI));
 
+        //Add robots to panel
         robots.add(robot1);
         robots.add(robot2);
         robots.add(robot3);
@@ -42,6 +43,9 @@ public class RobotPanel extends JPanel {
 
         //Add neighbors for robot 3
         robot3.addNeighbor(robot4); //Note: bidirectional connection ensured in addNeighbor
+
+        //Set different trust levels
+        robot4.setTrustLevel(TrustLevel.Hostile);
 
         //Add listner to robots for moving them by mouse drag
         addMouseListener( new MouseAdapter() {

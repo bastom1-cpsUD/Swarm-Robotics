@@ -10,6 +10,12 @@ import java.awt.RenderingHints;
 import org.transformations.OrientedPoint;
 import java.awt.Polygon;
 
+enum TrustLevel {
+    Friendly,
+    Suspected,
+    Hostile
+}
+
 public class LatticeRobot extends Polygon {
     //Robot unique identifier
     private final int AuthorityId;
@@ -18,12 +24,14 @@ public class LatticeRobot extends Polygon {
     //Local knowledge & edges
     private Set<LatticeRobot> neighbors;
     private Set<Edge> edges;
+    private TrustLevel trustLevel;
     protected double offsetX;
     protected double offsetY;
 
     public LatticeRobot(int authorityId, OrientedPoint position) {
         this.AuthorityId = authorityId;
         this.position = position;
+        this.trustLevel = TrustLevel.Friendly;
         this.neighbors = new HashSet<>();
         this.edges = new HashSet<>();
     }
@@ -49,6 +57,14 @@ public class LatticeRobot extends Polygon {
 
     public int getAuthorityId() {
         return AuthorityId;
+    }
+
+    public TrustLevel getTrustLevel() {
+        return trustLevel;
+    }
+
+    public void setTrustLevel(TrustLevel trustLevel) {
+        this.trustLevel = trustLevel;
     }
 
     public OrientedPoint getPosition() {
@@ -86,8 +102,28 @@ public class LatticeRobot extends Polygon {
     }
 
     public void draw(Graphics2D g2d) {
+        //Update polygon points before drawing
         updatePolygon();
+        //Create trust level polygon
+        Polygon trustPolygon = createTrustPolygon();
+
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+        // Draw trust level polygon
+        switch (trustLevel) {
+            case Friendly:
+                g2d.setColor(new Color(0, 255, 0, 150)); // Semi-transparent green
+                break;
+            case Suspected:
+                g2d.setColor(new Color(255, 255, 0, 150)); // Semi-transparent yellow
+                break;
+            case Hostile:
+                g2d.setColor(new Color(255, 0, 0, 150)); // Semi-transparent red
+                break;
+        }
+        g2d.fill(trustPolygon);
+
+        // Draw robot polygon
         g2d.setColor(Color.BLACK);
         g2d.fill(this);
     }
@@ -119,10 +155,34 @@ public class LatticeRobot extends Polygon {
         ycoords[3] =  (int) Math.round(position.y + R * Math.sin(angle));
 
         this.reset();
+
         for(int i = 0; i < xcoords.length; i++) {
             this.addPoint(xcoords[i], ycoords[i]);
         }
+    }
 
+    private Polygon createTrustPolygon() {
+
+        //Calculate Centroid of the robot polygon
+        int centroidX = 0;
+        int centroidY = 0;
+        for (int i = 0; i < this.npoints; i++) {
+            centroidX += this.xpoints[i];
+            centroidY += this.ypoints[i];
+        }
+        centroidX /= this.npoints;
+        centroidY /= this.npoints;
+
+        //Create a new polygon for trust level visualization
+        Polygon trustPolygon = new Polygon();
+        for (int i = 0; i < this.npoints; i++) {
+            //Scale points away from centroid
+            int scaledX = (int) Math.round(centroidX + 1.2 * (this.xpoints[i] - centroidX));
+            int scaledY = (int) Math.round(centroidY + 1.2 * (this.ypoints[i] - centroidY));
+            trustPolygon.addPoint(scaledX, scaledY);
+        }
+
+        return trustPolygon;
     }
 
     @Override
