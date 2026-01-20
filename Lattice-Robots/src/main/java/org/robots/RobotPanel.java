@@ -7,8 +7,12 @@ import org.transformations.OrientedPoint;
 import java.awt.event.MouseMotionAdapter;
 import java.util.ArrayList;
 import java.util.List;
+import java.awt.event.KeyEvent;
+import java.awt.event.KeyListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.image.BufferedImage;
+import java.time.LocalDateTime;
 
 public class RobotPanel extends JPanel {
     
@@ -20,6 +24,8 @@ public class RobotPanel extends JPanel {
         robots = new ArrayList<>();
         this.setPreferredSize(new java.awt.Dimension(900, 900));
         this.setBackground(java.awt.Color.WHITE);
+        this.setFocusable(true);
+        this.requestFocusInWindow();
 
         //Create 4 sample robots and connect them
         LatticeRobot robot1 = new LatticeRobot(1, new OrientedPoint(100, 100, 0));
@@ -91,6 +97,26 @@ public class RobotPanel extends JPanel {
                 }
             }
         });
+
+        this.addKeyListener( new KeyListener() {
+            @Override
+            public void keyTyped(KeyEvent e) {}
+
+            @Override
+            public void keyPressed(KeyEvent e) {
+                //Export JPEG image on 'S' key press
+                if(e.getKeyCode() == KeyEvent.VK_S) {
+                    LocalDateTime now = LocalDateTime.now();
+                    java.time.format.DateTimeFormatter formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy_MM_dd_HH_mm_ss");
+                    if(savePanelImageAsJPEG("build/robot_panel_snapshot_" + now.format(formatter) + ".png")) {
+                        System.out.println("Panel image saved as robot_panel_snapshot_" + now.format(formatter) + ".png");
+                    }
+                }
+            }
+
+            @Override
+            public void keyReleased(java.awt.event.KeyEvent e) {}
+        });
     }
 
     protected void paintComponent(java.awt.Graphics g) {
@@ -102,6 +128,24 @@ public class RobotPanel extends JPanel {
         for (LatticeRobot robot : robots) {
             robot.draw(g2d);
         }
+    }
+
+    public boolean savePanelImageAsJPEG(String filePath) {
+        //Create a buffered image
+        BufferedImage image = new BufferedImage(this.getWidth(), this.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        //Create a graphics context
+        java.awt.Graphics2D g2d = image.createGraphics();
+        this.paintAll(g2d);
+        g2d.dispose();
+        
+        try{
+            boolean test = javax.imageio.ImageIO.write(image, "png", new java.io.File(filePath));
+            return test;
+        } catch (java.io.IOException e) {
+            System.err.println("Error saving panel image: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }   
     }
 
     public static void main(String[] args) {
