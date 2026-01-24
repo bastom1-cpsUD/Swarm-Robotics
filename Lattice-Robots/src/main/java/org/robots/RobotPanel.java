@@ -4,14 +4,15 @@ import javax.swing.JPanel;
 
 import org.transformations.OrientedPoint;
 
-import java.awt.event.MouseMotionAdapter;
 import java.util.ArrayList;
 import java.util.List;
 import java.awt.event.KeyEvent;
+import java.awt.event.MouseMotionAdapter;
 import java.awt.event.KeyListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
+import java.awt.Graphics2D;
 import java.time.LocalDateTime;
 
 public class RobotPanel extends JPanel {
@@ -86,6 +87,7 @@ public class RobotPanel extends JPanel {
             }
         });
 
+        //Allow for dragging robots
         addMouseMotionListener(new MouseMotionAdapter() {
             @Override
             public void mouseDragged(MouseEvent e) {
@@ -98,6 +100,7 @@ public class RobotPanel extends JPanel {
             }
         });
 
+        //Add key listener for exporting panel image
         this.addKeyListener( new KeyListener() {
             @Override
             public void keyTyped(KeyEvent e) {}
@@ -121,7 +124,7 @@ public class RobotPanel extends JPanel {
 
     protected void paintComponent(java.awt.Graphics g) {
         super.paintComponent(g);
-        java.awt.Graphics2D g2d = (java.awt.Graphics2D) g;
+        Graphics2D g2d = (Graphics2D) g;
         for(LatticeRobot robot : robots) {
             robot.getEdges().forEach(edge -> edge.draw(g2d));
         }
@@ -134,7 +137,7 @@ public class RobotPanel extends JPanel {
         //Create a buffered image
         BufferedImage image = new BufferedImage(this.getWidth(), this.getHeight(), BufferedImage.TYPE_INT_ARGB);
         //Create a graphics context
-        java.awt.Graphics2D g2d = image.createGraphics();
+        Graphics2D g2d = image.createGraphics();
         this.paintAll(g2d);
         g2d.dispose();
         

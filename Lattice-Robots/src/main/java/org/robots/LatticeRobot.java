@@ -10,6 +10,7 @@ import java.awt.RenderingHints;
 import org.transformations.OrientedPoint;
 import java.awt.Polygon;
 
+
 enum TrustLevel {
     Friendly,
     Suspected,

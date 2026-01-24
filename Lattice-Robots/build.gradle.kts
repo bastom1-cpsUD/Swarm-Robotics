@@ -25,6 +25,10 @@ dependencies {
     implementation(libs.guava)
 
     implementation(project(":Transformations"))
+
+
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.21.0")
+
 }
 
 // Apply a specific Java toolchain to ease working on different environments.
