@@ -23,7 +23,6 @@ public class LatticeRobot extends Polygon {
     private OrientedPoint position;
 
     //Local knowledge & edges
-    private Set<LatticeRobot> neighbors;
     private Set<Edge> edges;
     private TrustLevel trustLevel;
     protected double offsetX;
@@ -33,27 +32,16 @@ public class LatticeRobot extends Polygon {
         this.AuthorityId = authorityId;
         this.position = position;
         this.trustLevel = TrustLevel.Friendly;
-        this.neighbors = new HashSet<>();
         this.edges = new HashSet<>();
     }
 
     public void addNeighbor(LatticeRobot other) {
-        this.neighbors.add(other);
-        other.neighbors.add(this); // Ensure bidirectional connection
-        this.edges.add(new Edge(this, other));
+        this.edges.add(new Edge(this.getAuthorityId(), other.getAuthorityId()));
+        other.edges.add(new Edge(other.getAuthorityId(), this.getAuthorityId()));
     }
 
     public void removeNeighbor(LatticeRobot neighbor) {
-        this.neighbors.remove(neighbor);
-        this.edges.removeIf(edge -> edge.getTo() == neighbor);
-    }
-
-    public String listNeighbors() {
-        String result = "";
-        for(LatticeRobot neighbor : neighbors) {
-            result += neighbor.toString() + "\n";
-        }
-        return result;
+        this.edges.removeIf(edge -> edge.getToId() == neighbor.getAuthorityId());
     }
 
     public int getAuthorityId() {
@@ -74,10 +62,6 @@ public class LatticeRobot extends Polygon {
 
     public void setPosition(OrientedPoint position) {
         this.position = position;
-    }
-
-    public Set<LatticeRobot> getNeighbors() {
-        return Collections.unmodifiableSet(neighbors);
     }
 
     public Set<Edge> getEdges() {
