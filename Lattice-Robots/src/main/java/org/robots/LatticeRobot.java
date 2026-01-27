@@ -25,8 +25,8 @@ public class LatticeRobot extends Polygon {
     //Local knowledge & edges
     private Set<Edge> edges;
     private TrustLevel trustLevel;
-    protected double offsetX;
-    protected double offsetY;
+
+    private static final int ROBOT_SIZE = 40; // Size of the robot for drawing
 
     public LatticeRobot(int authorityId, OrientedPoint position) {
         this.AuthorityId = authorityId;
@@ -115,7 +115,7 @@ public class LatticeRobot extends Polygon {
 
     private void updatePolygon() {
         // Update polygon points based on current position and orientation
-        double s = 40.0;
+        double s = ROBOT_SIZE;
         double R = s / Math.sqrt(3.0);
         double theta0 = position.getOrientation();
         int[] xcoords = new int[4];

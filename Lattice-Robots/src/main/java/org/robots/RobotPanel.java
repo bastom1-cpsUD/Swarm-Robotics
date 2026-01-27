@@ -25,6 +25,8 @@ public class RobotPanel extends JPanel {
     private static Map<Integer, LatticeRobot> robots;
     private LatticeRobot selectedRobot = null;
     private boolean dragging = false;
+    private double offsetX;
+    private double offsetY;
 
     public RobotPanel() {
         robots = new LinkedHashMap<Integer, LatticeRobot>();
@@ -52,8 +54,8 @@ public class RobotPanel extends JPanel {
                 if (hitRobot != null) {
                     dragging = true;
 
-                    hitRobot.offsetX = e.getX() - hitRobot.getPosition().x;
-                    hitRobot.offsetY = e.getY() - hitRobot.getPosition().y;
+                    offsetX = e.getX() - hitRobot.getPosition().x;
+                    offsetY = e.getY() - hitRobot.getPosition().y;
 
                     // Bring to front by re-inserting into the map
                     robots.remove(hitRobot.getAuthorityId());
@@ -82,8 +84,8 @@ public class RobotPanel extends JPanel {
             @Override
             public void mouseDragged(MouseEvent e) {
                 if(selectedRobot != null && dragging) {
-                    double nx = e.getX() - selectedRobot.offsetX;
-                    double ny = e.getY() - selectedRobot.offsetY;
+                    double nx = e.getX() - offsetX;
+                    double ny = e.getY() - offsetY;
                     selectedRobot.setPosition(new OrientedPoint(nx, ny, selectedRobot.getPosition().getOrientation()));
                     repaint();
                 }
@@ -97,24 +99,24 @@ public class RobotPanel extends JPanel {
 
             @Override
             public void keyPressed(KeyEvent e) {
-                //Export JPEG image on 'S' key press
+                //Export PNG image on 'S' key press
                 if(e.getKeyCode() == KeyEvent.VK_S) {
-                    if(savePanelImageAsJPEG()) {
-                        System.out.println("Panel image saved to build/robot_panel_images!");
+                    if(savePanelImageAsPNG()) {
+                        System.out.println("Panel image saved to output/robot_panel_images!");
                     }
                 }
 
                 //Export robot data on 'E' key press
                 if(e.getKeyCode() == KeyEvent.VK_E) {
                     if(exportDataToCSV()) {
-                        System.out.println("Robot data exported to build/robot_data!");
+                        System.out.println("Robot data exported to output/robot_data!");
                     }
                 }
 
                 //Import robot data on 'I' key press
                 if(e.getKeyCode() == KeyEvent.VK_I) {
                     if(readDataFromCSV()) {
-                        System.out.println("Robot data imported from build/robot_data!");
+                        System.out.println("Robot data imported from output/robot_data!");
                         repaint();
                     }
                 }
@@ -142,7 +144,7 @@ public class RobotPanel extends JPanel {
         }
     }
 
-    public boolean savePanelImageAsJPEG() {
+    public boolean savePanelImageAsPNG() {
         //Create a buffered image
         BufferedImage image = new BufferedImage(this.getWidth(), this.getHeight(), BufferedImage.TYPE_INT_ARGB);
         //Create a graphics context
@@ -151,14 +153,14 @@ public class RobotPanel extends JPanel {
         g2d.dispose();
         
         try{
-            File outputDir = new File("Output/robot_panel_images");
+            File outputDir = new File("output/robot_panel_images");
             if(!outputDir.exists()) {
                 outputDir.mkdirs();
             }
             LocalDateTime now = LocalDateTime.now();
             java.time.format.DateTimeFormatter formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy_MM_dd_HH_mm_ss");
             
-            String filePath = "Output/robot_panel_images/robot_panel_snapshot_" + now.format(formatter) + ".png";
+            String filePath = "output/robot_panel_images/robot_panel_snapshot_" + now.format(formatter) + ".png";
 
             boolean test = javax.imageio.ImageIO.write(image, "png", new java.io.File(filePath));
             return test;
@@ -171,7 +173,7 @@ public class RobotPanel extends JPanel {
 
     public static boolean exportDataToCSV() {
         //Create pose_info.txt
-        File outputDir = new File("Output/robot_data");
+        File outputDir = new File("output/robot_data");
         if(!outputDir.exists()) {
             outputDir.mkdirs();
         }
