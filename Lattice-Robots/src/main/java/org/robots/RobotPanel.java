@@ -4,6 +4,11 @@ import javax.swing.JPanel;
 
 import org.transformations.OrientedPoint;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Scanner;
@@ -35,9 +40,8 @@ public class RobotPanel extends JPanel {
         this.setFocusable(true);
         this.requestFocusInWindow();
 
-        //Add listner to robots for moving them by mouse drag
-        addMouseListener( new MouseAdapter() {
-            
+        //Add listener to robots for moving them by mouse drag
+        addMouseListener( new MouseAdapter() {           
             @Override
             public void mousePressed(MouseEvent e) {
 
@@ -106,6 +110,21 @@ public class RobotPanel extends JPanel {
                     }
                 }
 
+                //Export robot data on 'J' key press
+                if(e.getKeyCode() == KeyEvent.VK_J) {
+                    if(exportDatatoJSON()) {
+                        System.out.println("Robot data exported to output/robot_data!");
+                    }
+                }
+
+                //Import robot data on 'K' key press
+                if(e.getKeyCode() == KeyEvent.VK_K) {
+                    if(readDataFromJSON()) {
+                        System.out.println("Robot data imported from output/robot_data!");
+                        repaint();
+                    }
+                }
+
                 //Export robot data on 'E' key press
                 if(e.getKeyCode() == KeyEvent.VK_E) {
                     if(exportDataToCSV()) {
@@ -113,8 +132,8 @@ public class RobotPanel extends JPanel {
                     }
                 }
 
-                //Import robot data on 'I' key press
-                if(e.getKeyCode() == KeyEvent.VK_I) {
+                //Export robot data on 'R' key press
+                if(e.getKeyCode() == KeyEvent.VK_R) {
                     if(readDataFromCSV()) {
                         System.out.println("Robot data imported from output/robot_data!");
                         repaint();
@@ -232,9 +251,222 @@ public class RobotPanel extends JPanel {
         return true;
     }
 
+    public static boolean exportDatatoJSON() {
+
+        //Create output directory
+        File outputDir = new File("output/robot_data");
+        if(!outputDir.exists()) {
+            outputDir.mkdirs();
+        }
+
+        File jsonFile = new File(outputDir, "robot_data.json");
+
+        try {
+            //Create Jackson ObjectMapper
+            ObjectMapper mapper = new ObjectMapper();
+
+            //Create root JSON object (create file base)
+            ObjectNode rootNode = mapper.createObjectNode();
+
+            /*****************************
+                1. Write robots into file
+            ******************************/
+
+            //Create array to store robots in
+            ArrayNode robotsArray = mapper.createArrayNode();
+            
+            //Create a node for each robot's data and add to array
+            for(LatticeRobot robot : robots.values()) {
+                ObjectNode robotNode = mapper.createObjectNode();
+                OrientedPoint robotPose = robot.getPosition();
+
+                //Add data to node for single robot
+                robotNode.put("id", robot.getAuthorityId());
+                robotNode.put("x", robotPose.x);
+                robotNode.put("y", robotPose.y);
+                robotNode.put("orientation", robotPose.getOrientation());
+
+                //Add robot to robotsArray
+                robotsArray.add(robotNode);
+            }
+
+            //Add list of robots to JSON file
+            rootNode.set("robots", robotsArray);
+
+
+            /*****************************
+                2. Write edge links
+            ******************************/
+          
+            //Create array to stores edges in
+            ArrayNode edgesArray = mapper.createArrayNode();
+            
+            //Create a node for each edge to store data
+            for(LatticeRobot robot : robots.values()) {
+                
+                //Create a node for each edge's data
+                for(Edge edge : robot.getEdges()) {
+                    //Avoid duplicate edges by only writing when fromID < toID
+                    if(edge.getFromId() < edge.getToId()) {
+
+                        //Add data to node
+                        ObjectNode edgeNode = mapper.createObjectNode();
+                        edgeNode.put("fromId", edge.getFromId());
+                        edgeNode.put("toId", edge.getToId());
+
+                        //Add edge node to edge array
+                        edgesArray.add(edgeNode);
+                    }
+                }
+            }
+
+            //Add list of edges to JSON file
+            rootNode.set("edges", edgesArray);
+
+            /*****************************
+                3. Write trust levels
+            ******************************/
+
+            //Create array to store trust levels in
+            ArrayNode trustArray = mapper.createArrayNode();
+
+            //Create a node for each robot's trust level
+            for(LatticeRobot robot : robots.values()) {
+                ObjectNode trustNode = mapper.createObjectNode();
+
+                //Add data to node
+                trustNode.put("id", robot.getAuthorityId());
+                trustNode.put("trustLevel", robot.getTrustLevel().toString());
+
+                //Add trust node to trust array
+                trustArray.add(trustNode);
+            }
+
+            //Add list of trust levels to JSON file
+            rootNode.set("trust_levels", trustArray);
+
+            //Write JSON data to file
+            mapper.writerWithDefaultPrettyPrinter().writeValue(jsonFile, rootNode);
+        
+            return true;
+
+        } catch(IOException e) {
+            System.err.println("Error writing JSON file: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    public static boolean readDataFromJSON() {
+        //clear existing robots
+        robots.clear();
+
+        //Create file path for input file
+        File inputDir = new File("output/robot_data");
+        if(!inputDir.exists()) { 
+            System.out.println("Data does not exist. Cannot read in robot data");
+            return false;
+        }
+
+        //Create json file
+        File jsonFile = new File(inputDir, "robot_data.json");
+        if(!jsonFile.exists()) {
+            System.err.println("Json file does not exist: " + jsonFile.getPath());
+            return false;
+        }
+
+        try {
+            //create Jackson ObjectMapper
+            ObjectMapper mapper = new ObjectMapper();
+
+            //Read JSON file
+            JsonNode rootNode = mapper.readTree(jsonFile);
+
+            /*****************************
+                1. Read in robot data
+            ******************************/
+
+            //Access Robot array for robot data
+            JsonNode robotsNode = rootNode.get("robots");
+
+            //If array contains data, read and create robots
+            if(robotsNode != null && robotsNode.isArray()) {
+
+                //Create individual robots from objectNode informations
+                for(JsonNode robotNode : robotsNode) {
+
+                    //Retrieve data
+                    int robotId = robotNode.get("id").asInt();
+                    double x = robotNode.get("x").asDouble();
+                    double y = robotNode.get("y").asDouble();
+                    double orientation = robotNode.get("orientation").asDouble();
+
+                    //Create robot and add to panel map
+                    OrientedPoint robotPosition = new OrientedPoint(x, y, orientation);
+                    LatticeRobot importedRobot = new LatticeRobot(robotId, robotPosition);
+                    robots.put(robotId, importedRobot);
+                }
+            }
+
+            /*****************************
+                2. Read in edge data
+            ******************************/
+
+            //Access Edge array for edge data
+            JsonNode edgesNode = rootNode.get("edges");
+
+            //If array contains data, read and create edge
+            if(edgesNode != null && edgesNode.isArray()){
+                for(JsonNode edgeNode : edgesNode) {
+                    //Retrieve data
+                    int fromId = edgeNode.get("fromId").asInt();
+                    int toId = edgeNode.get("toId").asInt();
+
+                    //Create edge between robots
+                    LatticeRobot fromRobot = robots.get(fromId);
+                    LatticeRobot toRobot = robots.get(toId);
+
+                    if(fromRobot != null && toRobot != null) {
+                        fromRobot.addNeighbor(toRobot);
+                    }
+                }
+            }
+
+            /*****************************
+                3. Read in trust data
+            ******************************/
+
+            //Access trust array for trust data
+            JsonNode trustNode = rootNode.get("trust_levels");
+            
+            //If array contains data, read and assign trust levels
+            if(trustNode != null && trustNode.isArray()){
+                for(JsonNode trustInfo : trustNode) {
+                    //retrieve data
+                    int robotId = trustInfo.get("id").asInt();
+                    String trustLevelStr = trustInfo.get("trustLevel").asText();
+                    TrustLevel trust = TrustLevel.valueOf(trustLevelStr);
+
+                    //Assign trust level
+                    LatticeRobot robot = robots.get(robotId);
+                    if(robot != null) {
+                        robot.setTrustLevel(trust);
+                    }
+                }
+            }
+
+            return true;
+
+        } catch(IOException e) {
+            System.err.println("Error reading JSON file: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
+    }
+
     public static boolean readDataFromCSV() {
         //Create robots from pose_info.txt
-        File inputDir = new File("Output/robot_data");
+        File inputDir = new File("output/robot_data");
         if(!inputDir.exists()) {
             System.out.println("Data does not exist. Cannot read in robot data.");
         }
