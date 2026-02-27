@@ -1,52 +1,49 @@
 {
   "robots" : [ {
-    "id" : 4,
-    "x" : 625.0,
-    "y" : 544.0,
-    "orientation" : 3.14
-  }, {
-    "id" : 3,
-    "x" : 349.0,
-    "y" : 536.0,
-    "orientation" : 1.57
+    "id" : 1,
+    "x" : 350.0,
+    "y" : 319.0,
+    "orientation" : 0.0
   }, {
     "id" : 2,
-    "x" : 586.0,
-    "y" : 247.0,
+    "x" : 446.0,
+    "y" : 433.0,
     "orientation" : 0.79
   }, {
-    "id" : 1,
-    "x" : 384.0,
-    "y" : 374.0,
-    "orientation" : 0.0
+    "id" : 3,
+    "x" : 353.0,
+    "y" : 429.0,
+    "orientation" : 1.57
+  }, {
+    "id" : 4,
+    "x" : 573.0,
+    "y" : 308.0,
+    "orientation" : 3.14
   } ],
   "edges" : [ {
-    "fromId" : 3,
-    "toId" : 4
-  }, {
-    "fromId" : 2,
-    "toId" : 4
-  }, {
     "fromId" : 1,
     "toId" : 2
   }, {
     "fromId" : 1,
+    "toId" : 3
+  }, {
+    "fromId" : 2,
     "toId" : 4
   }, {
-    "fromId" : 1,
+    "fromId" : 2,
     "toId" : 3
   } ],
   "trust_levels" : [ {
-    "id" : 4,
-    "trustLevel" : "Hostile"
-  }, {
-    "id" : 3,
+    "id" : 1,
     "trustLevel" : "Friendly"
   }, {
     "id" : 2,
     "trustLevel" : "Friendly"
   }, {
-    "id" : 1,
+    "id" : 3,
     "trustLevel" : "Friendly"
+  }, {
+    "id" : 4,
+    "trustLevel" : "Hostile"
   } ]
 }

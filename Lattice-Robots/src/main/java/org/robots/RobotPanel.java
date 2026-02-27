@@ -11,8 +11,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import javax.swing.Timer;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseMotionAdapter;
+import java.awt.geom.Ellipse2D;
 import java.awt.event.KeyListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -20,15 +22,18 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.time.LocalDateTime;
 
 public class RobotPanel extends JPanel {
     
+    private static final int proximityThreshold = 200;
     private static Map<Integer, LatticeRobot> robots;
-    private LatticeRobot selectedRobot = null;
-    private boolean dragging = false;
-    private double offsetX;
-    private double offsetY;
+    private static LatticeRobot selectedRobot = null;
+    private static boolean dragging = false;
+    private static boolean displayRobotProximity = false;
+    private static double offsetX;
+    private static double offsetY;
 
     public RobotPanel() {
         robots = new LinkedHashMap<Integer, LatticeRobot>();
@@ -80,6 +85,16 @@ public class RobotPanel extends JPanel {
             }
         });
 
+        //Check proximity of robots to update edges when they are moved by mouse drag
+        Timer proximityTimer = new Timer(100, e -> {
+            if(!dragging) {
+                return; // Skip proximity check while dragging to improve performance
+            }
+            proximityCheckForAllRobots();
+            repaint();
+        });
+        proximityTimer.start();
+
         //Allow for dragging robots
         addMouseMotionListener(new MouseMotionAdapter() {
             @Override
@@ -93,7 +108,7 @@ public class RobotPanel extends JPanel {
             }
         });
 
-        //Add key listener for exporting panel image
+        //KEY LISTENERS: for exporting panel image and robot data, and importing robot data
         this.addKeyListener( new KeyListener() {
             @Override
             public void keyTyped(KeyEvent e) {}
@@ -121,6 +136,11 @@ public class RobotPanel extends JPanel {
                         repaint();
                     }
                 }
+
+                 if(e.getKeyCode() == KeyEvent.VK_D) {
+                    displayRobotProximity = !displayRobotProximity;
+                    repaint();
+                 }
             }
 
             @Override
@@ -131,6 +151,9 @@ public class RobotPanel extends JPanel {
     protected void paintComponent(java.awt.Graphics g) {
         super.paintComponent(g);
         Graphics2D g2d = (Graphics2D) g;
+        if(displayRobotProximity) {
+            drawRobotProximity(g2d);
+        }
         for(LatticeRobot robot : robots.values()) {
             //Draw edges
             robot.getEdges().forEach(edge -> {
@@ -384,6 +407,38 @@ public class RobotPanel extends JPanel {
             return false;
         }
     }
+    
+    public static void proximityCheckForAllRobots() {
+        for(LatticeRobot robot : robots.values()) {
+            for(LatticeRobot other : robots.values()) {
+                if(robot.getAuthorityId() != other.getAuthorityId()) {
+                    double distance = robot.getPosition().distance(other.getPosition());
+                    if(distance <= proximityThreshold) {
+                        robot.addNeighbor(other);
+                    } else {
+                        robot.removeNeighbor(other);
+                    }
+                }
+             }
+        }
+    }
+    
+    public static void drawRobotProximity(Graphics2D g) {
+        if(!displayRobotProximity) {
+            return;
+        }
+        Graphics2D g2d = (Graphics2D) g;
+        for(LatticeRobot robot: robots.values()) {
+            double x = robot.getPosition().x;
+            double y = robot.getPosition().y;
+
+            Ellipse2D.Double proximityCircle = new Ellipse2D.Double(x - proximityThreshold, y - proximityThreshold, proximityThreshold * 2, proximityThreshold * 2);
+
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2d.draw(proximityCircle);
+        }
+    }
+
     public static void main(String[] args) {
         javax.swing.JFrame frame = new javax.swing.JFrame("Lattice Robots Panel");
         RobotPanel panel = new RobotPanel();
@@ -394,4 +449,5 @@ public class RobotPanel extends JPanel {
         frame.setVisible(true);
     }
 }
+
 
