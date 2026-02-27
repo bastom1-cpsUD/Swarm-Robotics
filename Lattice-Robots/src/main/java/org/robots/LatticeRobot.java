@@ -36,11 +36,17 @@ public class LatticeRobot extends Polygon {
     }
 
     public void addNeighbor(LatticeRobot other) {
-        this.edges.add(new Edge(this.getAuthorityId(), other.getAuthorityId()));
-        other.edges.add(new Edge(other.getAuthorityId(), this.getAuthorityId()));
+        //Check if edge already exists to prevent duplicates
+        boolean edgeExists = this.edges.stream().anyMatch(edge -> edge.getToId() == other.getAuthorityId());
+
+        if(!edgeExists) {
+            this.edges.add(new Edge(this.getAuthorityId(), other.getAuthorityId()));
+            other.edges.add(new Edge(other.getAuthorityId(), this.getAuthorityId()));
+        }
     }
 
     public void removeNeighbor(LatticeRobot neighbor) {
+        neighbor.edges.removeIf(edge -> edge.getToId() == this.getAuthorityId());
         this.edges.removeIf(edge -> edge.getToId() == neighbor.getAuthorityId());
     }
 
