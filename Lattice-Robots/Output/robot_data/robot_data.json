@@ -16,8 +16,8 @@
     "orientation" : 0.0
   }, {
     "id" : 2,
-    "x" : 584.0,
-    "y" : 328.0,
+    "x" : 722.0,
+    "y" : 78.0,
     "orientation" : 0.79
   } ],
   "edges" : [ {
@@ -25,10 +25,10 @@
     "toId" : 4
   }, {
     "fromId" : 1,
-    "toId" : 4
+    "toId" : 3
   }, {
     "fromId" : 1,
-    "toId" : 3
+    "toId" : 4
   }, {
     "fromId" : 1,
     "toId" : 2
