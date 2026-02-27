@@ -1,4 +1,0 @@
-3,Friendly
-1,Friendly
-2,Friendly
-4,Hostile
