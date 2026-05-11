@@ -1,0 +1,49 @@
+package org.graphs;
+
+import Jama.Matrix;
+
+/**
+ * A class representing a rigid body transformation in 2D space, consisting of a rotation and a translation.
+ */
+public class Transformation {
+    /** The 3x3 transformation matrix. */
+    Matrix matrix;
+
+    /**
+     * Constructs a transformation that maps the 'from' oriented point to the 'to' oriented point.
+     * @param from The starting oriented point.
+     * @param to The target oriented point.
+     */
+    public Transformation(OrientedPoint from, OrientedPoint to) {
+        OrientedPoint delta = new OrientedPoint(to.x - from.x, to.y - from.y, to.getOrientation() - from.getOrientation());
+        double cosTheta = Math.cos(delta.getOrientation());
+        double sinTheta = Math.sin(delta.getOrientation());
+        this.matrix = new Matrix(new double[][] {
+            {cosTheta, -sinTheta, delta.x},
+            {sinTheta, cosTheta, delta.y},
+            {0, 0, 1}
+        });
+    }
+    
+    private Transformation(Matrix matrix) {
+        this.matrix = matrix;
+    }
+
+    /**
+     * Returns the inverse of this transformation.
+     * @return The inverse transformation.
+     */
+    public Transformation inverse() {
+        Matrix inverseMatrix = this.matrix.inverse();
+        return new Transformation(inverseMatrix);
+    }
+
+    public OrientedPoint apply(OrientedPoint point) {
+        Matrix pointMatrix = new Matrix(new double[][] {{point.x}, {point.y}, {1}});
+        Matrix result = this.matrix.times(pointMatrix);
+        double x = result.get(0, 0);
+        double y = result.get(1, 0);
+        double orientation = Math.atan2(this.matrix.get(1, 0), this.matrix.get(0, 0));
+        return new OrientedPoint(x, y, orientation);
+    }
+}

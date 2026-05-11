@@ -3,6 +3,8 @@ package org.robots;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.Objects;
+import java.util.Queue;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.awt.Graphics2D;
 import java.awt.Color;
@@ -19,12 +21,16 @@ enum TrustLevel {
 
 public class LatticeRobot extends Polygon {
     //Robot unique identifier
+    private Integer parentID; // Placeholder for parent robot reference in the hierarchy
     private final int AuthorityId;
+    private AuthorityList authorityList; //Placeholder for authority list implementation
     private OrientedPoint position;
+    private Queue<Message> messageQueue; // Placeholder for message queue implementation
 
     //Local knowledge & edges
     private Set<Edge> edges;
     private TrustLevel trustLevel;
+    private ArrayList<LatticeRobot> neighbors;
 
     private static final int ROBOT_SIZE = 40; // Size of the robot for drawing
 
@@ -33,6 +39,7 @@ public class LatticeRobot extends Polygon {
         this.position = position;
         this.trustLevel = TrustLevel.Friendly;
         this.edges = new HashSet<>();
+        this.neighbors = new ArrayList<>();
     }
 
     public void addNeighbor(LatticeRobot other) {
@@ -42,12 +49,16 @@ public class LatticeRobot extends Polygon {
         if(!edgeExists) {
             this.edges.add(new Edge(this.getAuthorityId(), other.getAuthorityId()));
             other.edges.add(new Edge(other.getAuthorityId(), this.getAuthorityId()));
+            this.neighbors.add(other);
+            other.neighbors.add(this);
         }
     }
 
     public void removeNeighbor(LatticeRobot neighbor) {
         neighbor.edges.removeIf(edge -> edge.getToId() == this.getAuthorityId());
         this.edges.removeIf(edge -> edge.getToId() == neighbor.getAuthorityId());
+        this.neighbors.remove(neighbor);
+        neighbor.neighbors.remove(this);
     }
 
     public int getAuthorityId() {
@@ -84,12 +95,12 @@ public class LatticeRobot extends Polygon {
         if (this == obj) return true;
         if (!(obj instanceof LatticeRobot)) return false;
         LatticeRobot other = (LatticeRobot) obj;
-        return AuthorityId == other.AuthorityId;
+        return AuthorityId == other.AuthorityId && authorityList.equals(other.authorityList);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(AuthorityId);
+        return Objects.hash(AuthorityId, authorityList);
     }
 
     public void draw(Graphics2D g2d) {
@@ -180,5 +191,43 @@ public class LatticeRobot extends Polygon {
     public boolean contains(int x, int y) {
         updatePolygon();
         return super.contains(x, y);
+    }
+
+    private void selectRole() {
+        //Step 1: Discard message where self appears in the authority list
+        messageQueue.removeIf(msg -> msg.getAuthority().contains(this.AuthorityId));
+        //Step 2: Form own authority list composed of own id
+        AuthorityList ownAuthority = new AuthorityList(this.AuthorityId);
+        AuthorityList greatestAuthority = ownAuthority;
+        //Step 3: For the remaining messages, compare own authority list with the authority list in the message. 
+        for(Message msg : messageQueue) {
+            AuthorityList msgAuthority = msg.getAuthority();
+            if(msgAuthority.compareTo(greatestAuthority) < 0) {
+                greatestAuthority = msgAuthority;
+            }
+        }
+        //Decide role based on outcome of comparison
+        if (greatestAuthority.equals(ownAuthority)) {
+            //Assume leader role
+            parentID = null;
+        } else {
+            //Assume follower role
+            parentID = ownAuthority.getMostRecentAuthority();
+        }
+    }
+
+    //Tomorrow Problem
+    public void assignVertices() {
+        //Placeholder for vertex assignment algorithm implementation
+        // Retrieve Robots in neighborhood
+        for(LatticeRobot neighbor : neighbors) {
+            //Treat current position as the origin of this robot's local coordinate system and calculate relative position of neighbor to each graph vertex
+        
+        }
+    }
+
+    public void sendMessage() {
+        Message msg = new Message(this.authorityList);
+
     }
 }

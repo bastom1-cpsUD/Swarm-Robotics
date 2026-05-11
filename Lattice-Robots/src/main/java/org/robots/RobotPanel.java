@@ -1,14 +1,11 @@
 package org.robots;
 
 import javax.swing.JPanel;
-
 import org.transformations.OrientedPoint;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-
 import java.util.LinkedHashMap;
 import java.util.Map;
 import javax.swing.Timer;
@@ -137,10 +134,10 @@ public class RobotPanel extends JPanel {
                     }
                 }
 
-                 if(e.getKeyCode() == KeyEvent.VK_D) {
+                if(e.getKeyCode() == KeyEvent.VK_D) {
                     displayRobotProximity = !displayRobotProximity;
                     repaint();
-                 }
+                }
             }
 
             @Override
