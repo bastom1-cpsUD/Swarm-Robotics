@@ -25,6 +25,10 @@ public class OrientedPoint extends java.awt.geom.Point2D.Double {
         return Math.toDegrees(orientation);
     }
 
+    public double distanceTo(OrientedPoint other) {
+        return this.distance(other);
+    }
+
     @Override
     public boolean equals(Object obj) {
         if (this == obj) return true;

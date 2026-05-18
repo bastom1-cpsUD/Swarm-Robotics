@@ -5,7 +5,7 @@ import Jama.Matrix;
 /**
  * A class representing a rigid body transformation in 2D space, consisting of a rotation and a translation.
  */
-public class Transformation {
+public class RigidBodyTransformation {
     /** The 3x3 transformation matrix. */
     Matrix matrix;
 
@@ -14,7 +14,7 @@ public class Transformation {
      * @param from The starting oriented point.
      * @param to The target oriented point.
      */
-    public Transformation(OrientedPoint from, OrientedPoint to) {
+    public RigidBodyTransformation(OrientedPoint from, OrientedPoint to) {
         OrientedPoint delta = new OrientedPoint(to.x - from.x, to.y - from.y, to.getOrientation() - from.getOrientation());
         double cosTheta = Math.cos(delta.getOrientation());
         double sinTheta = Math.sin(delta.getOrientation());
@@ -24,8 +24,18 @@ public class Transformation {
             {0, 0, 1}
         });
     }
+
+    public RigidBodyTransformation(OrientedPoint to) {
+        double cosTheta = Math.cos(to.getOrientation());
+        double sinTheta = Math.sin(to.getOrientation());
+        this.matrix = new Matrix(new double[][] {
+            {cosTheta, -sinTheta, to.x},
+            {sinTheta, cosTheta, to.y},
+            {0, 0, 1}
+        });
+    }
     
-    private Transformation(Matrix matrix) {
+    private RigidBodyTransformation(Matrix matrix) {
         this.matrix = matrix;
     }
 
@@ -33,9 +43,9 @@ public class Transformation {
      * Returns the inverse of this transformation.
      * @return The inverse transformation.
      */
-    public Transformation inverse() {
+    public RigidBodyTransformation inverse() {
         Matrix inverseMatrix = this.matrix.inverse();
-        return new Transformation(inverseMatrix);
+        return new RigidBodyTransformation(inverseMatrix);
     }
 
     public OrientedPoint apply(OrientedPoint point) {

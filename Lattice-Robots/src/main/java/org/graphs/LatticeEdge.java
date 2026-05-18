@@ -3,11 +3,11 @@ package org.graphs;
 public class LatticeEdge {
     private OrientedPoint from;
     private OrientedPoint to;
-    private Transformation transformation;
+    private RigidBodyTransformation transformation;
     public LatticeEdge(OrientedPoint from, OrientedPoint to) {
         this.from = from;
         this.to = to;
-        this.transformation = new Transformation(from, to);
+        this.transformation = new RigidBodyTransformation(from, to);
     }
 
     public OrientedPoint getFrom() {
@@ -18,11 +18,11 @@ public class LatticeEdge {
         return to;
     }
 
-    public Transformation getEdgeTransformation() {
+    public RigidBodyTransformation getEdgeTransformation() {
         return transformation;
     }
 
-    public Transformation getInverseEdgeTransformation() {
+    public RigidBodyTransformation getInverseEdgeTransformation() {
         return transformation.inverse();
     }
 }

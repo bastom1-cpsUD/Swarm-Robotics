@@ -2,6 +2,7 @@ package org.robots;
 
 import java.util.Set;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.ArrayList;
@@ -9,8 +10,13 @@ import java.util.Collections;
 import java.awt.Graphics2D;
 import java.awt.Color;
 import java.awt.RenderingHints;
-import org.transformations.OrientedPoint;
+
+import org.graphs.RigidBodyTransformation;
+import org.graphs.LatticeEdge;
+import org.graphs.LatticeGraph;
+import org.graphs.OrientedPoint;
 import java.awt.Polygon;
+import org.graphs.SquareLattice;
 
 
 enum TrustLevel {
@@ -28,6 +34,8 @@ public class LatticeRobot extends Polygon {
     private Queue<Message> messageQueue; // Placeholder for message queue implementation
 
     //Local knowledge & edges
+    private static final LatticeGraph LATTICE_GRAPH = new SquareLattice(); // Placeholder for graph implementation
+    private OrientedPoint destination; // Placeholder for destination vertex assignment
     private Set<Edge> edges;
     private TrustLevel trustLevel;
     private ArrayList<LatticeRobot> neighbors;
@@ -218,14 +226,79 @@ public class LatticeRobot extends Polygon {
 
     //Tomorrow Problem
     public void assignVertices() {
-        //Placeholder for vertex assignment algorithm implementation
-        // Retrieve Robots in neighborhood
-        for(LatticeRobot neighbor : neighbors) {
-            //Treat current position as the origin of this robot's local coordinate system and calculate relative position of neighbor to each graph vertex
-        
-        }
+        boolean isRoot = (parentID == null);
+        RigidBodyTransformation GlobalToLocalCoords = new RigidBodyTransformation(this.position).inverse();
+
+        double[][] costMatrix = calculateCostMatrix(LATTICE_GRAPH.getOutgoingEdges(LATTICE_GRAPH.getPrimaryVertex()), neighbors);
     }
 
+    private double[][] calculateCostMatrix(List<LatticeEdge> edges, List<LatticeRobot> neighbors) {
+        boolean isRoot = (parentID == null);
+        int matrixSize = Math.max(edges.size(), neighbors.size());
+        RigidBodyTransformation GlobalToLocalCoords = new RigidBodyTransformation(this.position).inverse();
+        double[][] costMatrix = new double[matrixSize][matrixSize];
+
+        if(isRoot) {
+            //Calculate cost matrix based on distance from neighbors to outgoing edges; neighbors are rows, edges are columns
+            for(int i = 0; i < neighbors.size(); i++) {
+                for(int j = 0; j < edges.size(); j++) {
+                    //Calculate neighbor's relative position in the local coordinate system of the root
+                    OrientedPoint neighborLocalPos = GlobalToLocalCoords.apply(neighbors.get(i).getPosition());
+                    OrientedPoint desiredPosition = edges.get(j).getEdgeTransformation().apply(new OrientedPoint(0,0,0));
+                    //Calculate distance to the edge's target vertex
+                    double distanceToEdge = neighborLocalPos.distanceTo(desiredPosition);
+
+                    costMatrix[i][j] = distanceToEdge;
+                }
+            }
+
+            return costMatrix;
+        } else {
+            //Calculate cost matrix based on distance from neighbors to incoming edges; neighbors are rows, edges are columns
+             for(int i = 0; i < neighbors.size(); i++) {
+                for(int j = 0; j < edges.size(); j++) {
+                    //Calculate neighbor's relative position in the local coordinate system of the root
+                    OrientedPoint neighborLocalPos = GlobalToLocalCoords.apply(neighbors.get(i).getPosition());
+                    OrientedPoint desiredPosition = edges.get(j).getEdgeTransformation().apply(new OrientedPoint(0,0,0));
+                    //Calculate distance to the edge's target vertex
+                    double distanceToEdge = neighborLocalPos.distanceTo(desiredPosition);
+
+                    if(neighbors.get(i).getAuthorityId() == parentID) {
+                        /*
+                        
+                        */
+                        
+                        continue;
+                    }
+
+                    costMatrix[i][j] = distanceToEdge;
+                }
+            }
+        }  
+        
+        
+        //Pad remaining cells if necessary
+
+        //If there are less neighbors than edges, pad remaining rows with high cost to prevent assignment
+        if(neighbors.size() < matrixSize) {
+            for(int i = neighbors.size(); i < matrixSize; i++) {
+                for(int j = 0; j < edges.size(); j++) {
+                    costMatrix[i][j] = 1000; // Assign a high cost to discourage assignment
+                }
+            }
+        } else if(edges.size() < matrixSize) {
+            //If there are less edges than neighbors, pad remaining columns with high cost to prevent assignment
+            for(int i = 0; i < neighbors.size(); i++) {
+                for(int j = edges.size(); j < matrixSize; j++) {
+                    costMatrix[i][j] = 1000; // Assign a high cost to discourage assignment                    }
+                }
+            }
+        }
+        
+        return null;
+    }
+
+    //Placeholder for message sending method, to be implemented in future iterations
     public void sendMessage() {
         Message msg = new Message(this.authorityList);
 
