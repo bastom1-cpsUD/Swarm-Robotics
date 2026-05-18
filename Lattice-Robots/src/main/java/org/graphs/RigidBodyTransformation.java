@@ -56,4 +56,30 @@ public class RigidBodyTransformation {
         double orientation = Math.atan2(this.matrix.get(1, 0), this.matrix.get(0, 0));
         return new OrientedPoint(x, y, orientation);
     }
+
+    public boolean isInverse(RigidBodyTransformation other) {
+        Matrix result = this.matrix.times(other.matrix);
+
+        int rows = result.getRowDimension();
+        int cols = result.getColumnDimension();
+
+        if (rows != cols) {
+            return false;
+        }
+
+        double epsilon = 1e-9;
+
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+
+                double expected = (i == j) ? 1.0 : 0.0;
+
+                if (Math.abs(result.get(i, j) - expected) > epsilon) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
 }

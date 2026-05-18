@@ -1,20 +1,22 @@
 package org.graphs;
 
 public class LatticeEdge {
-    private OrientedPoint from;
-    private OrientedPoint to;
+    private Vertex from;
+    private Vertex to;
+    private OrientedPoint toPos;
     private RigidBodyTransformation transformation;
-    public LatticeEdge(OrientedPoint from, OrientedPoint to) {
+    public LatticeEdge(Vertex from, Vertex to, OrientedPoint pose) {
         this.from = from;
         this.to = to;
-        this.transformation = new RigidBodyTransformation(from, to);
+        this.toPos = pose;
+        this.transformation = new RigidBodyTransformation(from.getPose(), toPos);
     }
 
-    public OrientedPoint getFrom() {
+    public Vertex getFrom() {
         return from;
     }
 
-    public OrientedPoint getTo() {
+    public Vertex getTo() {
         return to;
     }
 

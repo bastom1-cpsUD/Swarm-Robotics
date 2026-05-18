@@ -1,21 +1,24 @@
 package org.graphs;
 
 import java.util.ArrayList;
-import java.util.List;
 
 public class SquareLattice extends LatticeGraph {
     public SquareLattice() {
         super();
         // Define the vertice of the square lattice
-        OrientedPoint v0 = new OrientedPoint(0, 0, 0);
-        this.vertices.add(v0);
+        Vertex v0 = new Vertex(0, new OrientedPoint(0, 0, 0));
 
         // Define the edges of the square lattice with appropriate transformations
-        List<LatticeEdge> v0edges = new ArrayList<>();
-        v0edges.add(new LatticeEdge(v0, new OrientedPoint(40, 0, 0))); // right
-        v0edges.add(new LatticeEdge(v0, new OrientedPoint(0, 40, 0))); // up
-        v0edges.add(new LatticeEdge(v0, new OrientedPoint(-40, 0, 0))); // left
-        v0edges.add(new LatticeEdge(v0, new OrientedPoint(0, -40, 0))); // down
+        ArrayList<LatticeEdge> v0edges = new ArrayList<>();
+        LatticeEdge e1 = new LatticeEdge(v0, v0, new OrientedPoint(0,40,0)); // UP
+        LatticeEdge e2 = new LatticeEdge(v0, v0, new OrientedPoint(40, 0, 0)); // RIGHT
+        LatticeEdge e3 = new LatticeEdge(v0, v0, new OrientedPoint(0, -40, 0)); // DOWN
+        LatticeEdge e4 = new LatticeEdge(v0, v0, new OrientedPoint(-40, 0, 0)); // LEFT        
+
+        v0edges.add(e1);
+        v0edges.add(e2);
+        v0edges.add(e3);
+        v0edges.add(e4);
 
         this.edges.put(v0, v0edges);
     }

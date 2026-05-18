@@ -1,6 +1,9 @@
 package org.robots;
 
 import java.util.Set;
+
+import javax.swing.TransferHandler;
+
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -17,6 +20,7 @@ import org.graphs.LatticeGraph;
 import org.graphs.OrientedPoint;
 import java.awt.Polygon;
 import org.graphs.SquareLattice;
+import org.graphs.Vertex;
 
 
 enum TrustLevel {
@@ -27,7 +31,6 @@ enum TrustLevel {
 
 public class LatticeRobot extends Polygon {
     //Robot unique identifier
-    private Integer parentID; // Placeholder for parent robot reference in the hierarchy
     private final int AuthorityId;
     private AuthorityList authorityList; //Placeholder for authority list implementation
     private OrientedPoint position;
@@ -35,10 +38,13 @@ public class LatticeRobot extends Polygon {
 
     //Local knowledge & edges
     private static final LatticeGraph LATTICE_GRAPH = new SquareLattice(); // Placeholder for graph implementation
-    private OrientedPoint destination; // Placeholder for destination vertex assignment
+    private LatticeRobot parent; // Placeholder for parent robot reference in the hierarchy
     private Set<Edge> edges;
     private TrustLevel trustLevel;
     private ArrayList<LatticeRobot> neighbors;
+
+    public LatticeEdge assignedEdge;
+
 
     private static final int ROBOT_SIZE = 40; // Size of the robot for drawing
 
@@ -48,6 +54,8 @@ public class LatticeRobot extends Polygon {
         this.trustLevel = TrustLevel.Friendly;
         this.edges = new HashSet<>();
         this.neighbors = new ArrayList<>();
+        this.assignedEdge = null;
+        this.parent = null;
     }
 
     public void addNeighbor(LatticeRobot other) {
@@ -201,6 +209,7 @@ public class LatticeRobot extends Polygon {
         return super.contains(x, y);
     }
 
+    //MUST FIX SELECT ROLE WITH REGARDS TO ROLES
     private void selectRole() {
         //Step 1: Discard message where self appears in the authority list
         messageQueue.removeIf(msg -> msg.getAuthority().contains(this.AuthorityId));
@@ -217,90 +226,120 @@ public class LatticeRobot extends Polygon {
         //Decide role based on outcome of comparison
         if (greatestAuthority.equals(ownAuthority)) {
             //Assume leader role
-            parentID = null;
+            parent = null;
         } else {
             //Assume follower role
-            parentID = ownAuthority.getMostRecentAuthority();
+            parent = null;
         }
     }
 
     //Tomorrow Problem
     public void assignVertices() {
-        boolean isRoot = (parentID == null);
-        RigidBodyTransformation GlobalToLocalCoords = new RigidBodyTransformation(this.position).inverse();
+        double[][] costMatrix = calculateCostMatrix();
+        
+        for(int i = 0; i < costMatrix.length; i++) {
+            for(int j = 0; j < costMatrix[0].length; j++) {
+                System.out.print(costMatrix[i][j] + " ");
+            }
+            System.out.println();
+        }
 
-        double[][] costMatrix = calculateCostMatrix(LATTICE_GRAPH.getOutgoingEdges(LATTICE_GRAPH.getPrimaryVertex()), neighbors);
+        HungarianAlgo hung = new HungarianAlgo(costMatrix);
+        int[][] assignment = hung.solve();
+        System.out.println("Optimal Assignment:");
+        for(int i = 0; i < assignment.length; i++) {
+            System.out.println("Robot " + (assignment[i][0] + 1) + " assigned to Edge " + (assignment[i][1] + 1));
+        }
+
     }
 
-    private double[][] calculateCostMatrix(List<LatticeEdge> edges, List<LatticeRobot> neighbors) {
-        boolean isRoot = (parentID == null);
-        int matrixSize = Math.max(edges.size(), neighbors.size());
-        RigidBodyTransformation GlobalToLocalCoords = new RigidBodyTransformation(this.position).inverse();
-        double[][] costMatrix = new double[matrixSize][matrixSize];
+    private double[][] calculateCostMatrix() {
+        //Determine vertex
+        Vertex myVertex = parent == null ? LATTICE_GRAPH.getPrimaryVertex() : assignedEdge.getTo();
+        
+        //Get outgoing edges of vertex
+        ArrayList<LatticeEdge> outgoingEdges = LATTICE_GRAPH.getOutgoingEdges(myVertex);
 
-        if(isRoot) {
-            //Calculate cost matrix based on distance from neighbors to outgoing edges; neighbors are rows, edges are columns
+        //Get global to local matrix for multiplication
+        final RigidBodyTransformation GLOBAL_TO_LOCAL = new RigidBodyTransformation(this.position).inverse();
+        final int INF = 1000;
+
+        double[][] cost = new double[neighbors.size()][outgoingEdges.size()];
+        
+        //If robot is a root, simply get neighbors and assign them edges
+        if(parent == null) {
             for(int i = 0; i < neighbors.size(); i++) {
-                for(int j = 0; j < edges.size(); j++) {
-                    //Calculate neighbor's relative position in the local coordinate system of the root
-                    OrientedPoint neighborLocalPos = GlobalToLocalCoords.apply(neighbors.get(i).getPosition());
-                    OrientedPoint desiredPosition = edges.get(j).getEdgeTransformation().apply(new OrientedPoint(0,0,0));
-                    //Calculate distance to the edge's target vertex
-                    double distanceToEdge = neighborLocalPos.distanceTo(desiredPosition);
+                for(int j = 0; j < outgoingEdges.size(); j++) {
+                    //Get local position of neighboring robot
+                    OrientedPoint localPos = GLOBAL_TO_LOCAL.apply(neighbors.get(i).getPosition());
 
-                    costMatrix[i][j] = distanceToEdge;
+                    //Get destination of the edge in local coordinates
+                    OrientedPoint destination = outgoingEdges.get(j).getEdgeTransformation().apply(new OrientedPoint(0,0,0));
+                    
+                    //Assign euclidean distance between two points to the cost matrix entry
+                    cost[i][j] = localPos.distance(destination);
                 }
             }
-
-            return costMatrix;
-        } else {
-            //Calculate cost matrix based on distance from neighbors to incoming edges; neighbors are rows, edges are columns
-             for(int i = 0; i < neighbors.size(); i++) {
-                for(int j = 0; j < edges.size(); j++) {
-                    //Calculate neighbor's relative position in the local coordinate system of the root
-                    OrientedPoint neighborLocalPos = GlobalToLocalCoords.apply(neighbors.get(i).getPosition());
-                    OrientedPoint desiredPosition = edges.get(j).getEdgeTransformation().apply(new OrientedPoint(0,0,0));
-                    //Calculate distance to the edge's target vertex
-                    double distanceToEdge = neighborLocalPos.distanceTo(desiredPosition);
-
-                    if(neighbors.get(i).getAuthorityId() == parentID) {
-                        /*
-                        
-                        */
-                        
-                        continue;
+        } 
+        //If robot is a child, ensure child obeys assignment by assigning parent to its prescribed edge
+        else {
+            for(int i = 0; i < neighbors.size(); i++) {
+                //Assign parent correct inverse edge
+                if(neighbors.get(i) == parent) {
+                    for(int j = 0; j < outgoingEdges.size(); j++) {
+                        if(outgoingEdges.get(j).getEdgeTransformation().isInverse(assignedEdge.getEdgeTransformation())) {
+                            cost[i][j] = 0;
+                        } else {
+                            cost[i][j] = INF;
+                        }
                     }
+                } else {
+                    for(int j = 0; j < outgoingEdges.size(); j++) {
+                        //Get local position of neighboring robot
+                        OrientedPoint localPos = GLOBAL_TO_LOCAL.apply(neighbors.get(i).getPosition());
 
-                    costMatrix[i][j] = distanceToEdge;
-                }
-            }
-        }  
-        
-        
-        //Pad remaining cells if necessary
-
-        //If there are less neighbors than edges, pad remaining rows with high cost to prevent assignment
-        if(neighbors.size() < matrixSize) {
-            for(int i = neighbors.size(); i < matrixSize; i++) {
-                for(int j = 0; j < edges.size(); j++) {
-                    costMatrix[i][j] = 1000; // Assign a high cost to discourage assignment
-                }
-            }
-        } else if(edges.size() < matrixSize) {
-            //If there are less edges than neighbors, pad remaining columns with high cost to prevent assignment
-            for(int i = 0; i < neighbors.size(); i++) {
-                for(int j = edges.size(); j < matrixSize; j++) {
-                    costMatrix[i][j] = 1000; // Assign a high cost to discourage assignment                    }
+                        //Get destination of the edge in local coordinates
+                        OrientedPoint destination = outgoingEdges.get(j).getEdgeTransformation().apply(new OrientedPoint(0,0,0));
+                        
+                        //Assign euclidean distance between two points to the cost matrix entry
+                        cost[i][j] = localPos.distance(destination);
+                    }
                 }
             }
         }
-        
-        return null;
+    
+        return cost;
     }
 
     //Placeholder for message sending method, to be implemented in future iterations
     public void sendMessage() {
         Message msg = new Message(this.authorityList);
 
+    }
+
+    public static void main(String[] args) {
+        LatticeRobot L1 = new LatticeRobot(1,new OrientedPoint(80, 40, 0));
+        LatticeRobot L2 = new LatticeRobot(2,new OrientedPoint(40, 0, 0));
+        LatticeRobot L3 = new LatticeRobot(3, new OrientedPoint(40, 40, 0));
+        LatticeRobot L4 = new LatticeRobot(4, new OrientedPoint(80, 120, 0));
+        LatticeRobot L5 = new LatticeRobot(5, new OrientedPoint(120, 80, 0));
+
+        L1.addNeighbor(L2);
+        L1.addNeighbor(L3);
+        L1.addNeighbor(L4);
+        L1.addNeighbor(L5);
+
+        L2.addNeighbor(L3);
+        L2.addNeighbor(L4);
+        L2.addNeighbor(L5);
+
+        L3.addNeighbor(L4);
+        L3.addNeighbor(L5);
+
+        
+        L3.parent = L1;
+        L3.assignedEdge = LATTICE_GRAPH.getOutgoingEdges(LATTICE_GRAPH.getPrimaryVertex()).get(3);
+
+        L3.assignVertices();
     }
 }
