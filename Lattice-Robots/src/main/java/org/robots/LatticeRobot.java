@@ -21,6 +21,7 @@ import org.graphs.OrientedPoint;
 import java.awt.Polygon;
 import org.graphs.SquareLattice;
 import org.graphs.Vertex;
+import org.robots.HungarianAlgo.HungarianAlgo;
 
 
 enum TrustLevel {
