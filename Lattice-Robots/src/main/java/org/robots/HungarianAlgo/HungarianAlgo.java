@@ -149,7 +149,7 @@ public class HungarianAlgo {
         }
     }
 
-private int[] primeZeroes() {
+    private int[] primeZeroes() {
 
     System.out.println("Priming Zeroes...");
 

@@ -4,7 +4,7 @@ package org.graphs;
  */
 public class OrientedPoint extends java.awt.geom.Point2D.Double {
     
-    private double orientation; // in radians
+    public double orientation; // in radians
 
     /**
      * Constructor to initialize the oriented point.
