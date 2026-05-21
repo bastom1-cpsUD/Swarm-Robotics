@@ -1,10 +1,10 @@
-package org.robots;
+package org.graphs;
 /**
  * An extension of Point2D.Double that includes an orientation (angle in radians).
  */
 public class OrientedPoint extends java.awt.geom.Point2D.Double {
     
-    private double orientation; // in radians
+    public double orientation; // in radians
 
     /**
      * Constructor to initialize the oriented point.
@@ -23,6 +23,10 @@ public class OrientedPoint extends java.awt.geom.Point2D.Double {
 
     public double getOrientationInDegrees() {
         return Math.toDegrees(orientation);
+    }
+
+    public double distanceTo(OrientedPoint other) {
+        return this.distance(other);
     }
 
     @Override

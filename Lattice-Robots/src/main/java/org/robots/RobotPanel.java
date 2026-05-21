@@ -1,14 +1,10 @@
 package org.robots;
 
 import javax.swing.JPanel;
-
-import org.transformations.OrientedPoint;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-
 import java.util.LinkedHashMap;
 import java.util.Map;
 import javax.swing.Timer;
@@ -24,10 +20,11 @@ import java.io.IOException;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.time.LocalDateTime;
+import org.graphs.OrientedPoint;
 
 public class RobotPanel extends JPanel {
     
-    private static final int proximityThreshold = 200;
+    private static final int proximityThreshold = 200; // Distance threshold for proximity-based edge creation
     private static Map<Integer, LatticeRobot> robots;
     private static LatticeRobot selectedRobot = null;
     private static boolean dragging = false;
@@ -137,10 +134,10 @@ public class RobotPanel extends JPanel {
                     }
                 }
 
-                 if(e.getKeyCode() == KeyEvent.VK_D) {
+                if(e.getKeyCode() == KeyEvent.VK_D) {
                     displayRobotProximity = !displayRobotProximity;
                     repaint();
-                 }
+                }
             }
 
             @Override
