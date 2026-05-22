@@ -1,4 +1,4 @@
-package org.robots;
+package org.communicationModels;
 import java.util.ArrayList;
 /**
  * A class to manage a list of authority IDs for a robot, with the first ID being the root authority, and the most

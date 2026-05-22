@@ -1,4 +1,4 @@
- package org.robots.HungarianAlgo;
+ package org.communicationModels.HungarianAlgo;
 
 import java.util.ArrayList;
 

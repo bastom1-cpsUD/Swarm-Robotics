@@ -1,4 +1,4 @@
-package org.robots.DiffDriveModel;
+package org.DiffDriveModel;
 
 import java.awt.Color;
 import java.awt.Dimension;
@@ -13,6 +13,7 @@ import javax.swing.JPanel;
 import javax.swing.Timer;
 
 import org.graphs.OrientedPoint;
+import org.robots.LatticeRobot;
 
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
@@ -20,7 +21,7 @@ import java.util.ArrayList;
 
 public class DiffDriveModelDriver extends JPanel {
 
-    private DiffDriveRobot robot;
+    private LatticeRobot robot;
     private ArrayList<Point2D> trace;
     private boolean traceOn;
     private boolean targetOutlineOn;
@@ -32,7 +33,7 @@ public class DiffDriveModelDriver extends JPanel {
         this.setFocusable(true);
         this.requestFocusInWindow();
 
-        robot = new DiffDriveRobot();
+        robot = new LatticeRobot(1, new OrientedPoint(500, 500, 0));
         trace = new ArrayList<>();
         traceOn = false;
 
@@ -42,9 +43,6 @@ public class DiffDriveModelDriver extends JPanel {
 
             @Override
             public void keyPressed(KeyEvent e) {
-                if(e.getKeyCode() == KeyEvent.VK_SPACE) {
-                    beginCircleSimulation();
-                }
 
                 if(e.getKeyCode() == KeyEvent.VK_T) {
                     traceOn = !traceOn;
@@ -82,29 +80,6 @@ public class DiffDriveModelDriver extends JPanel {
             if(done) {
                 System.exit(0);
             }
-        });
-
-        start.start(); 
-    }
-
-    private void beginCircleSimulation() {
-        //Move robot 100 meters, with v = 2m/s
-        long startTime = System.nanoTime();
-
-        final long[] lastMovementTime = {System.nanoTime()};
-
-        Timer start = new Timer(1000 / 30, e -> {
-
-            long currentTime = System.nanoTime();
-            double dt = (currentTime - lastMovementTime[0]) / 1_000_000_000.0;
-
-            lastMovementTime[0] = currentTime;
-            //Robot get position; add to trace arraylist
-            trace.add(robot.getPosition());
-            robot.move(20, Math.PI / 8, dt);
-            System.out.println(robot);
-            System.out.println((currentTime - startTime) / 1_000_000_000 + " seconds");
-            repaint();
         });
 
         start.start(); 

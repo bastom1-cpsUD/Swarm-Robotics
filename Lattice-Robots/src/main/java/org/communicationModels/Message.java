@@ -1,4 +1,4 @@
-package org.robots;
+package org.communicationModels;
 
 public class Message {
     //Placeholder for message content, currently only includes authority list for leader election

@@ -1,4 +1,4 @@
-package org.robots.HungarianAlgo;
+package org.communicationModels.HungarianAlgo;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;

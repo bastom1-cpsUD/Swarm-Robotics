@@ -1,4 +1,4 @@
-package org.robots;
+package org.simulation;
 
 import javax.swing.JPanel;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -17,9 +17,13 @@ import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.time.LocalDateTime;
+
+import org.robots.LatticeRobot;
+import org.communicationModels.TrustLevel;
 import org.graphs.OrientedPoint;
 
 public class RobotPanel extends JPanel {
@@ -61,8 +65,8 @@ public class RobotPanel extends JPanel {
                     offsetY = e.getY() - hitRobot.getPosition().y;
 
                     // Bring to front by re-inserting into the map
-                    robots.remove(hitRobot.getAuthorityId());
-                    robots.put(hitRobot.getAuthorityId(), hitRobot);
+                    robots.remove(hitRobot.getRobotId());
+                    robots.put(hitRobot.getRobotId(), hitRobot);
 
                     selectedRobot = hitRobot;
                     repaint();
@@ -160,8 +164,11 @@ public class RobotPanel extends JPanel {
                 edge.draw(g2d, robot, to);
             });
         }
+        
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.setColor(Color.BLACK);
         for(LatticeRobot robot : robots.values()) {
-            robot.draw(g2d);
+            g2d.fill(robot.draw());
         }
     }
 
@@ -222,7 +229,7 @@ public class RobotPanel extends JPanel {
                 OrientedPoint robotPose = robot.getPosition();
 
                 //Add data to node for single robot
-                robotNode.put("id", robot.getAuthorityId());
+                robotNode.put("id", robot.getRobotId());
                 robotNode.put("x", robotPose.x);
                 robotNode.put("y", robotPose.y);
                 robotNode.put("orientation", robotPose.getOrientation());
@@ -276,7 +283,7 @@ public class RobotPanel extends JPanel {
                 ObjectNode trustNode = mapper.createObjectNode();
 
                 //Add data to node
-                trustNode.put("id", robot.getAuthorityId());
+                trustNode.put("id", robot.getRobotId());
                 trustNode.put("trustLevel", robot.getTrustLevel().toString());
 
                 //Add trust node to trust array
@@ -408,7 +415,7 @@ public class RobotPanel extends JPanel {
     public static void proximityCheckForAllRobots() {
         for(LatticeRobot robot : robots.values()) {
             for(LatticeRobot other : robots.values()) {
-                if(robot.getAuthorityId() != other.getAuthorityId()) {
+                if(robot.getRobotId() != other.getRobotId()) {
                     double distance = robot.getPosition().distance(other.getPosition());
                     if(distance <= proximityThreshold) {
                         robot.addNeighbor(other);
