@@ -23,6 +23,8 @@ public class LatticeRobot extends Robot implements Communicatable {
     private Set<Edge> edges;
     private ArrayList<LatticeRobot> neighbors;
 
+    private OrientedPoint assignedPosition;
+
     public LatticeRobot(int id, OrientedPoint pose) {
         super(id, pose, new TimeStepDiffDrive(), new TriangularModel());
         this.commsSystem = new DecentralizedComms(id, this);
@@ -70,6 +72,19 @@ public class LatticeRobot extends Robot implements Communicatable {
     public void processMessages() {
         commsSystem.processMessages();
     }
+
+    public void executeTimeStep() {
+        commsSystem.syncPeers(neighbors);
+        processMessages();
+        commsSystem.broadcastAssignment();
+    }
+
+    @Override
+    public void move(double dt) {
+        assignedPosition = commsSystem.retrieveAssignmentLocation();
+        if(assignedPosition == null) {
+            return;
+        }
+        motionModel.moveTo(pose, assignedPosition, dt);
+    }
 }
-
-

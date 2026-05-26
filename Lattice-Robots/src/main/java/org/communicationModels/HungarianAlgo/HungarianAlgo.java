@@ -22,8 +22,6 @@ public class HungarianAlgo {
     private final boolean[] coveredRows;
     private final boolean[] coveredCols;
 
-
-
     public HungarianAlgo(double[][] costMatrix) {
         if (costMatrix == null || costMatrix.length == 0 || costMatrix[0].length == 0) {
             throw new IllegalArgumentException("Cost matrix cannot be null or empty");

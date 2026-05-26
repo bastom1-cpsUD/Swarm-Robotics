@@ -82,6 +82,15 @@ public class AuthorityList implements Comparable<AuthorityList> {
     public boolean contains(int authorityId) {
         return authorities.contains(authorityId);
     }
+
+    /**
+     * Checks is the authorityId provided is the root of the authority list
+     * @param authorityId
+     * @return  true if the first authority in the list is the root, false otherwise
+     */
+    public boolean isRoot(int authorityId) {
+        return getRootAuthority() == authorityId;
+    }
     
     @Override
     public boolean equals(Object obj) {

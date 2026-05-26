@@ -72,7 +72,7 @@ public class DiffDriveModelDriver extends JPanel {
 
             lastMovementTime[0] = currentTime;
             //Robot get position; add to trace arraylist
-            trace.add(robot.getPosition());
+            trace.add((OrientedPoint) robot.getPosition().clone());
             boolean done = robot.moveTo(ASSIGNED_POINT, dt);
             System.out.println(robot);
             System.out.println((currentTime - startTime) / 1_000_000_000 + " seconds");

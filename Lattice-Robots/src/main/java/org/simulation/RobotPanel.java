@@ -142,12 +142,44 @@ public class RobotPanel extends JPanel {
                     displayRobotProximity = !displayRobotProximity;
                     repaint();
                 }
+
+                if(e.getKeyCode() == KeyEvent.VK_SPACE) {
+                    beginSimulation();
+                }
             }
 
             @Override
             public void keyReleased(java.awt.event.KeyEvent e) {}
         });
     }
+
+    private void beginSimulation() {
+    final long[] lastFrameTime = {System.nanoTime()};
+    final long[] lastStateTime = {System.nanoTime()};
+
+    Timer simLoop = new Timer(1000 / 30, e -> {
+        long current = System.nanoTime();
+        double dt = (current - lastFrameTime[0]) / 1_000_000_000.0;
+        lastFrameTime[0] = current;
+
+        // State update — only when a full second has elapsed
+        if (current - lastStateTime[0] >= 1_000_000_000L) {
+            lastStateTime[0] = current;
+            for (LatticeRobot robot : robots.values()) {
+                robot.executeTimeStep(); // always completes before move
+            }
+        }
+
+        // Movement — always runs after the state block above
+        for (LatticeRobot robot : robots.values()) {
+            robot.move(dt);
+        }
+
+        repaint();
+    });
+
+    simLoop.start();
+}
 
     protected void paintComponent(java.awt.Graphics g) {
         super.paintComponent(g);
