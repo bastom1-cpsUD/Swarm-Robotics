@@ -70,13 +70,14 @@ public class LatticeRobot extends Robot implements Communicatable {
 
     @Override
     public void processMessages() {
+        commsSystem.syncPeers(neighbors);
         commsSystem.processMessages();
     }
 
     public void executeTimeStep() {
-        commsSystem.syncPeers(neighbors);
-        processMessages();
-        commsSystem.broadcastAssignment();
+        if(commsSystem.isRoot() || commsSystem.isAssigned()) {
+            commsSystem.broadcastAssignment();
+        }
     }
 
     @Override

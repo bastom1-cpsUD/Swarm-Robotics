@@ -11,7 +11,10 @@ import org.graphs.LatticeEdge;
 import org.graphs.SquareLattice;
 import org.graphs.Vertex;
 
-public class DecentralizedComms extends CommunicationSystem{
+public class DecentralizedComms extends CommunicationSystem {
+
+    protected int persID;
+
     protected LatticeRobot self;
     protected Integer parentId;
     protected TrustLevel trustLevel;
@@ -27,6 +30,8 @@ public class DecentralizedComms extends CommunicationSystem{
         assignedEdge = null;
         authorityList = new AuthorityList(self.getRobotId());
         trustLevel = TrustLevel.Friendly;
+
+        persID = self.getRobotId();
     }
 
     @Override
@@ -71,8 +76,8 @@ public class DecentralizedComms extends CommunicationSystem{
            Integer robot = assignments[i][0] >= commPeers.size() ? null : assignments[i][0];
            Integer edge = assignments[i][1] >= outgoingEdges.size() ? null : assignments[i][1];
 
-           if(robot != null) {
-                Message msg = new Message(this.authorityList, edge == null ? null : outgoingEdges.get(edge));
+           if(robot != null && edge != null) {
+                Message msg = new Message(this.authorityList, outgoingEdges.get(edge));
                 commPeers.get(robot).enqueueMessage(msg);
            }
         }
@@ -107,7 +112,7 @@ public class DecentralizedComms extends CommunicationSystem{
     }
 
     public boolean isAssigned() {
-        return assignedEdge == null;
+        return assignedEdge != null;
     }
 
     public void syncPeers(ArrayList<LatticeRobot> neighbors) {
