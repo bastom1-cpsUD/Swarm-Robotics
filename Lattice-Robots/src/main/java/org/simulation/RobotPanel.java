@@ -27,8 +27,6 @@ import org.communicationModels.TrustLevel;
 import org.graphs.OrientedPoint;
 
 public class RobotPanel extends JPanel {
-    
-    private static final int proximityThreshold = 200; // Distance threshold for proximity-based edge creation
     private static Map<Integer, LatticeRobot> robots;
     private static LatticeRobot selectedRobot = null;
     private static boolean dragging = false;
@@ -157,7 +155,7 @@ public class RobotPanel extends JPanel {
     final long[] lastFrameTime = {System.nanoTime()};
     final long[] lastStateTime = {System.nanoTime()};
 
-    Timer simLoop = new Timer(1000 / 10, e -> {
+    Timer simLoop = new Timer(1000 / 30, e -> {
         long current = System.nanoTime();
         double dt = (current - lastFrameTime[0]) / 1_000_000_000.0;
         lastFrameTime[0] = current;
@@ -175,6 +173,7 @@ public class RobotPanel extends JPanel {
 
         // Movement — always runs after the state block above
         for (LatticeRobot robot : robots.values()) {
+
             robot.move(dt);
         }
         proximityCheckForAllRobots();
@@ -452,7 +451,7 @@ public class RobotPanel extends JPanel {
             for(LatticeRobot other : robots.values()) {
                 if(robot.getRobotId() != other.getRobotId()) {
                     double distance = robot.getPosition().distance(other.getPosition());
-                    if(distance <= proximityThreshold) {
+                    if(distance <= LatticeRobot.COMM_RANGE) {
                         robot.addNeighbor(other);
                     } else {
                         robot.removeNeighbor(other);
@@ -470,6 +469,8 @@ public class RobotPanel extends JPanel {
         for(LatticeRobot robot: robots.values()) {
             double x = robot.getPosition().x;
             double y = robot.getPosition().y;
+
+            double proximityThreshold = LatticeRobot.COMM_RANGE;
 
             Ellipse2D.Double proximityCircle = new Ellipse2D.Double(x - proximityThreshold, y - proximityThreshold, proximityThreshold * 2, proximityThreshold * 2);
 

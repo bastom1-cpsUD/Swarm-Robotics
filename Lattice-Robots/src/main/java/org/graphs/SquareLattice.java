@@ -10,10 +10,10 @@ public class SquareLattice extends LatticeGraph {
 
         // Define the edges of the square lattice with appropriate transformations
         ArrayList<LatticeEdge> v0edges = new ArrayList<>();
-        LatticeEdge e1 = new LatticeEdge(v0, v0, new OrientedPoint(0,40,0)); // UP
-        LatticeEdge e2 = new LatticeEdge(v0, v0, new OrientedPoint(40, 0, 0)); // RIGHT
-        LatticeEdge e3 = new LatticeEdge(v0, v0, new OrientedPoint(0, -40, 0)); // DOWN
-        LatticeEdge e4 = new LatticeEdge(v0, v0, new OrientedPoint(-40, 0, 0)); // LEFT        
+        LatticeEdge e1 = new LatticeEdge(v0, new Vertex(0, new OrientedPoint(0, 0, 0)), new OrientedPoint(0,50,0)); // UP
+        LatticeEdge e2 = new LatticeEdge(v0, new Vertex(0, new OrientedPoint(0, 0, 0)), new OrientedPoint(50, 0, 0)); // RIGHT
+        LatticeEdge e3 = new LatticeEdge(v0, new Vertex(0, new OrientedPoint(0, 0, 0)), new OrientedPoint(0, -50, 0)); // DOWN
+        LatticeEdge e4 = new LatticeEdge(v0, new Vertex(0, new OrientedPoint(0, 0, 0)), new OrientedPoint(-50, 0, 0)); // LEFT        
 
         v0edges.add(e1);
         v0edges.add(e2);

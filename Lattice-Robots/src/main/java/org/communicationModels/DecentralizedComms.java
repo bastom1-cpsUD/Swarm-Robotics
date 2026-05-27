@@ -11,9 +11,10 @@ import org.graphs.LatticeEdge;
 import org.graphs.SquareLattice;
 import org.graphs.Vertex;
 
+/**
+ * A Decentralized communication system based on the proposed methodology outlined in Song & OKane 2014
+ */
 public class DecentralizedComms extends CommunicationSystem {
-
-    protected int persID;
 
     protected LatticeRobot self;
     protected Integer parentId;
@@ -26,21 +27,21 @@ public class DecentralizedComms extends CommunicationSystem {
     public DecentralizedComms(int robotId, LatticeRobot self) {
         this.self = self;
         this.parentId = null;
-        this.commPeers = null;
-        assignedEdge = null;
+        this.commPeers = new ArrayList<LatticeRobot>();
+        assignedEdge = new LatticeEdge();
         authorityList = new AuthorityList(self.getRobotId());
         trustLevel = TrustLevel.Friendly;
-
-        persID = self.getRobotId();
     }
 
     @Override
     public void processMessages() {
         //Step 1: Discard message where self appears in the authority list
         incomingMessages.removeIf(msg -> msg.getAuthority().contains(self.getRobotId()));
+        
         //Step 2: Form own authority list composed of own id
         AuthorityList ownAuthority = new AuthorityList(self.getRobotId());
         AuthorityList greatestAuthority = ownAuthority;
+        
         //Step 3: For the remaining messages, compare own authority list with the authority list in the message. 
         for(Message msg : incomingMessages) {
             AuthorityList msgAuthority = msg.getAuthority();
@@ -50,21 +51,28 @@ public class DecentralizedComms extends CommunicationSystem {
             }
         }
 
-        //Step 4: Adopt greatest authority
+        //Step 4: Adopt greatest authority or retain own authority
         if(ownAuthority.equals(greatestAuthority)) { 
             parentId = null;
+            assignedEdge = null;
+            authorityList = new AuthorityList(self.getRobotId());
             incomingMessages.clear();
             return;
         }
     
         parentId = greatestAuthority.getMostRecentAuthority();
-        greatestAuthority.addAuthority(self.getRobotId());
-        authorityList = greatestAuthority;
+        //Make copy of authority list to avoid cycling
+        AuthorityList myAuthority = new AuthorityList(greatestAuthority.getAuthorities());
+        authorityList = myAuthority;
         incomingMessages.clear();
     }
 
     public void broadcastAssignment() {
         int[][] assignments = assignVertices();
+
+        if(assignments == null) {
+            return;
+        }
 
         //Determine vertex
         Vertex myVertex = isRoot() ? LATTICE_GRAPH.getPrimaryVertex() : assignedEdge.getTo();
@@ -76,16 +84,17 @@ public class DecentralizedComms extends CommunicationSystem {
            Integer robot = assignments[i][0] >= commPeers.size() ? null : assignments[i][0];
            Integer edge = assignments[i][1] >= outgoingEdges.size() ? null : assignments[i][1];
 
-           if(robot != null && edge != null) {
-                Message msg = new Message(this.authorityList, outgoingEdges.get(edge));
+           if(robot != null) {
+                AuthorityList msgAuthority = new AuthorityList(this.authorityList.getAuthorities());
+                Message msg = new Message(msgAuthority, (edge == null) ? new LatticeEdge() : outgoingEdges.get(edge));
                 commPeers.get(robot).enqueueMessage(msg);
            }
         }
     }
 
     public OrientedPoint retrieveAssignmentLocation() {
-        if(parentId == null) {
-            return null;
+        if(isRoot() && parentId == null) {
+            return self.getPosition();
         }
 
         LatticeRobot parent = null;
@@ -96,26 +105,37 @@ public class DecentralizedComms extends CommunicationSystem {
             }
         }
 
+        if(assignedEdge.isNull()) {
+            return null;
+        }
+
         //Get transformation of parent that translates local coords to global positions
         RigidBodyTransformation parentLocalToGlobal = new RigidBodyTransformation(parent.getPosition());
 
         //Apply transformation of parent to assigned position to get global position of assigned target
-        OrientedPoint assignedLocationGlobal = parentLocalToGlobal.apply(assignedEdge.getTo().getPose());
+        OrientedPoint assignedLocationGlobal = parentLocalToGlobal.apply(assignedEdge.getToPos());
     
         //Do we need to convert to local if this is just for positioning???
 
         return assignedLocationGlobal;
     }
 
+    /**
+     * Determines whether the robot is a root robot within the authority tree
+     * @return status as a root
+     */
     public boolean isRoot() {
         return authorityList.isRoot(self.getRobotId());
     }
 
     public boolean isAssigned() {
-        return assignedEdge != null;
+        return assignedEdge.isNull();
     }
 
     public void syncPeers(ArrayList<LatticeRobot> neighbors) {
+        if(neighbors == null || neighbors.isEmpty()) {
+            this.commPeers = new ArrayList<>();
+        }
         this.commPeers = neighbors;
     }
 
@@ -128,6 +148,9 @@ public class DecentralizedComms extends CommunicationSystem {
     }
 
     private int[][] assignVertices() {
+        if(commPeers.isEmpty()) {
+            return null;
+        }
         double[][] costMatrix = calculateCostMatrix();
         
         /*for(int i = 0; i < costMatrix.length; i++) {

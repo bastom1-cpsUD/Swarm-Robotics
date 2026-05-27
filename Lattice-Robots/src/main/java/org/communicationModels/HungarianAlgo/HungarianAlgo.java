@@ -2,26 +2,31 @@
 
 import java.util.ArrayList;
 
+/**
+ * A class recreating the hungarian algorithm, with pseudocode laid out by Duke University
+ */
 public class HungarianAlgo {
      private final double[][] costMatrix;
 
     private final int numRows;
     private final int numCols;
 
-    // Starred zeros
     // starsCol[row] = col of starred zero in row
     private final int[] starsCol;
 
     // starsRow[col] = row of starred zero in col
     private final int[] starsRow;
 
-    // Primed zeros
     // primes[row] = col of primed zero in row
     private final int[] primes;
 
     private final boolean[] coveredRows;
     private final boolean[] coveredCols;
 
+    /**
+     * Public constructor that builds a Hungarian algorithm object
+     * @param costMatrix the cost matrix of the assignment problem
+     */
     public HungarianAlgo(double[][] costMatrix) {
         if (costMatrix == null || costMatrix.length == 0 || costMatrix[0].length == 0) {
             throw new IllegalArgumentException("Cost matrix cannot be null or empty");
@@ -31,14 +36,10 @@ public class HungarianAlgo {
         this.numCols = costMatrix[0].length;
 
         if(numRows > numCols) {
-            // Implement padding with dummy columns to make the cost matrix square later
-            //Remember to label dummy columns appropriately to avoid confusion in the assignment results
             throw new IllegalArgumentException("Cost matrix must be square for the Hungarian Algorithm");
         }
 
         if(numCols < numRows) {
-            // Implement padding with dummy rows to make the cost matrix square later
-            //Remember to label dummy rows appropriately to avoid confusion in the assignment results
             throw new IllegalArgumentException("Cost matrix must be square for the Hungarian Algorithm");
         }
 
@@ -61,6 +62,10 @@ public class HungarianAlgo {
         }
     }
 
+    /**
+     * Solves the assignment problem by calling each step of the Hungarian algorithm
+     * @return optimal assignment for task problem
+    */
     public int[][] solve() {
         // Step 1: Reduce the rows of the cost matrix
         reduceMatrix();
@@ -107,6 +112,9 @@ public class HungarianAlgo {
         return true;
     }
 
+    /**
+     * Reduces the matrix by subtracting the minimum value from each row
+     */
     private void reduceMatrix() {
 
     System.out.println("Reducing matrix...");
@@ -126,6 +134,9 @@ public class HungarianAlgo {
     }
 }
 
+    /**
+     * stars zeros once per row & column; acts as drawing lines to eliminate all zeros
+     */
     private void starZeros() {
         System.out.println("Starring zeroes...");
         
@@ -147,6 +158,10 @@ public class HungarianAlgo {
         }
     }
 
+    /**
+     * Primes zeros that are not covered by the starred rows/columns
+     * @return position of uncovered prime zero for the construction of the alternating primed and starred zero path
+     */
     private int[] primeZeroes() {
 
     System.out.println("Priming Zeroes...");
@@ -193,36 +208,11 @@ public class HungarianAlgo {
     }
 }
 
-   private int[] findNonCoveredZero() {
-    for(int i = 0; i < numRows; i++) {
-        if(coveredRows[i]) continue;
-        for(int j = 0; j < numCols; j++) {
-
-            if(!coveredCols[j] && isZero(costMatrix[i][j])) {
-                return new int[]{i, j};
-            }
-        }
-    }
-    return null;
-}
-
-    private boolean isZero(double value) {
-        return Math.abs(value) < 1e-9;
-    }
-   
-    private void adjustMatrixBySmallest(double minValue) {
-    for (int i = 0; i < numRows; i++) {
-        for (int j = 0; j < numCols; j++) {
-            if (coveredRows[i] && coveredCols[j]) {
-                costMatrix[i][j] += minValue;   // doubly covered → add
-            } else if (!coveredRows[i] && !coveredCols[j]) {
-                costMatrix[i][j] -= minValue;   // uncovered → subtract
-            }
-        }
-    }
-}
-
-   private void augmentPath(int[] startPrime) {
+    /**
+     * Constructs the alternating path that unstars starred zeros and stars primed zeros
+     * @param startPrime the position of the uncovered primed zero 
+     */
+    private void augmentPath(int[] startPrime) {
         ArrayList<int[]> primedZeros = new ArrayList<>();
         ArrayList<int[]> starredZeros = new ArrayList<>();
 
@@ -259,6 +249,35 @@ public class HungarianAlgo {
         for (int i = 0; i < numRows; i++) coveredRows[i] = false;
         for (int j = 0; j < numCols; j++) coveredCols[j] = false;
     }  
+    
+    private int[] findNonCoveredZero() {
+        for(int i = 0; i < numRows; i++) {
+            for(int j = 0; j < numCols; j++) {
+
+                if(!coveredCols[j] && !coveredRows[i] && isZero(costMatrix[i][j])) {
+                    return new int[]{i, j};
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean isZero(double value) {
+        return Math.abs(value) < 1e-9;
+    }
+   
+    private void adjustMatrixBySmallest(double minValue) {
+    for (int i = 0; i < numRows; i++) {
+        for (int j = 0; j < numCols; j++) {
+            if (coveredRows[i] && coveredCols[j]) {
+                costMatrix[i][j] += minValue;   // doubly covered → add
+            } else if (!coveredRows[i] && !coveredCols[j]) {
+                costMatrix[i][j] -= minValue;   // uncovered → subtract
+            }
+        }
+    }
+    }
+
     public static void main(String[] args) {
         double[][] costMatrix = {
             {2500, 4000, 3500},

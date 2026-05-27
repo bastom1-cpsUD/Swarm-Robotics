@@ -17,6 +17,12 @@ public class OrientedPoint extends java.awt.geom.Point2D.Double {
         this.orientation = orientation;
     }
 
+    public OrientedPoint(OrientedPoint pose) {
+        this.x = pose.x;
+        this.y = pose.y;
+        this.orientation = pose.orientation;
+    }
+
     public double getOrientation() {
         return orientation;
     }

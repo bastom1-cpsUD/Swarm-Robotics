@@ -12,21 +12,36 @@ public class TimeStepDiffDrive extends MotionModel {
     private double leftAngularVel;
     private double rightAngularVel;
     private MoveState moveState = MoveState.DONE;
+    private double timeElapsed;
     
-    private static final double MAX_LINEAR_SPEED = 5.0;
+    private static final double MAX_LINEAR_SPEED = 10.0;
     private static final double WHEEL_RADIUS = 4;
     private static final double DISTANCE_BETWEEN_WHEELS = 30;
     private static final double MAX_ANGULAR_SPEED = MAX_LINEAR_SPEED / WHEEL_RADIUS;
+    private final double TIME_TO_ESCAPE_CONGESTION;
+
+    public TimeStepDiffDrive(double commRange) {
+        super();
+        TIME_TO_ESCAPE_CONGESTION = 2* commRange / MAX_LINEAR_SPEED;
+    }
 
     public boolean move(OrientedPoint pose, double dt) {
+        if(timeElapsed >= TIME_TO_ESCAPE_CONGESTION) {
+            timeElapsed = 0.0;
+            changeState(0, 0);
+            return true;
+        }
+        changeState(MAX_ANGULAR_SPEED, MAX_ANGULAR_SPEED);
+
         pose.x = pose.x + (WHEEL_RADIUS / 2) * (leftAngularVel + rightAngularVel) * Math.cos(pose.orientation) * dt;
         pose.y = pose.y + (WHEEL_RADIUS / 2) * (leftAngularVel + rightAngularVel) * Math.sin(pose.orientation) * dt;
         if(leftAngularVel != rightAngularVel) {
             pose.orientation = normalizeAngle(pose.orientation + (WHEEL_RADIUS / DISTANCE_BETWEEN_WHEELS) * (rightAngularVel - leftAngularVel) * dt);    
         }
 
-        distTraveled = distTraveled + (WHEEL_RADIUS * (leftAngularVel + rightAngularVel) / 2) * dt;
-        return true;
+        distTraveled = distTraveled + MAX_LINEAR_SPEED * dt;
+        timeElapsed += dt;
+        return false;
     }
 
     public boolean moveTo(OrientedPoint currentPose, OrientedPoint newPose, double dt) {

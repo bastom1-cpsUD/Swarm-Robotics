@@ -115,9 +115,9 @@ public class AuthorityList implements Comparable<AuthorityList> {
     @Override
     public int compareTo(AuthorityList other) {
         //Case 1: A1 has higher authority than A2 if A1 root is greater than A2 root
-        if(this.authorities.get(0) > other.authorities.get(0)) {
+        if(this.authorities.get(0) < other.authorities.get(0)) {
             return -1;   
-        } else if(this.authorities.get(0) < other.authorities.get(0)) {
+        } else if(this.authorities.get(0) > other.authorities.get(0)) {
             return 1;
         }
         //Case 2: If A1 and A2 have the same root, but A1 has fewer authorities than A2, then A1 is higher than A2
@@ -127,9 +127,9 @@ public class AuthorityList implements Comparable<AuthorityList> {
             return 1;
 
         //Case 3: If A1 and A2 have the same root and the same number of authorities, but A1's most recently added authority is greater than A2'
-        } else if(this.authorities.get(this.authorities.size() - 1) > other.authorities.get(other.authorities.size() - 1)) {
-            return -1;
         } else if(this.authorities.get(this.authorities.size() - 1) < other.authorities.get(other.authorities.size() - 1)) {
+            return -1;
+        } else if(this.authorities.get(this.authorities.size() - 1) > other.authorities.get(other.authorities.size() - 1)) {
             return 1;
         }
         return 0;

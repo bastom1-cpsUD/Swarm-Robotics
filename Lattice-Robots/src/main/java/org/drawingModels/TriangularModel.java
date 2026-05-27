@@ -6,7 +6,7 @@ import java.awt.Polygon;
 
 public class TriangularModel extends DrawingModel{
     
-    private static final double ROBOT_SIZE = 40;
+    private static final double ROBOT_SIZE = 30;
 
     public TriangularModel() {
         currentModel = new Polygon();

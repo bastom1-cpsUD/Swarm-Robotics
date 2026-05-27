@@ -3,6 +3,9 @@ package org.communicationModels;
 import java.util.ArrayDeque;
 import java.util.Queue;
 
+/**
+ * An abstract class outline the commonalities and essential functions of any communication system
+ */
 public abstract class CommunicationSystem {
     protected Queue<Message> incomingMessages;
     protected Queue<Action> actionQueue;

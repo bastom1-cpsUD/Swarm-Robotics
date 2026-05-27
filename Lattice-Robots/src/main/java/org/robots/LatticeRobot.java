@@ -23,13 +23,16 @@ public class LatticeRobot extends Robot implements Communicatable {
     private Set<Edge> edges;
     private ArrayList<LatticeRobot> neighbors;
 
+    public final static double COMM_RANGE = 75.0;
     private OrientedPoint assignedPosition;
+    private boolean inCongestedArea;
 
     public LatticeRobot(int id, OrientedPoint pose) {
-        super(id, pose, new TimeStepDiffDrive(), new TriangularModel());
+        super(id, pose, new TimeStepDiffDrive(COMM_RANGE), new TriangularModel());
         this.commsSystem = new DecentralizedComms(id, this);
         this.edges = new HashSet<>();
         this.neighbors = new ArrayList<>();
+        this.inCongestedArea = false;
     }
 
     public void setTrustLevel(TrustLevel trust) {
@@ -70,22 +73,35 @@ public class LatticeRobot extends Robot implements Communicatable {
 
     @Override
     public void processMessages() {
-        commsSystem.syncPeers(neighbors);
-        commsSystem.processMessages();
+        if(!inCongestedArea) {
+            commsSystem.syncPeers(neighbors);
+            commsSystem.processMessages();
+        }
     }
 
     public void executeTimeStep() {
-        if(commsSystem.isRoot() || commsSystem.isAssigned()) {
+        if((commsSystem.isRoot() || commsSystem.isAssigned()) && !inCongestedArea) {
             commsSystem.broadcastAssignment();
         }
     }
 
     @Override
     public void move(double dt) {
-        assignedPosition = commsSystem.retrieveAssignmentLocation();
-        if(assignedPosition == null) {
+        OrientedPoint newAssignment = commsSystem.retrieveAssignmentLocation();
+        if(newAssignment == null) {
+            inCongestedArea = true;
+        }
+
+        if(inCongestedArea == true) {
+            inCongestedArea = !motionModel.move(pose,dt);
             return;
         }
+
+        if(!newAssignment.equals(assignedPosition)) {
+            assignedPosition = newAssignment;
+            motionModel.startMoving();
+        }
+
         motionModel.moveTo(pose, assignedPosition, dt);
     }
 }
