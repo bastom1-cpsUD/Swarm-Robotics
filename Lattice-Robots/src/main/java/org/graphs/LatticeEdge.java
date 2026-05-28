@@ -45,4 +45,9 @@ public class LatticeEdge {
     public boolean isNull() {
         return isNull;
     }
+
+    @Override
+    public String toString() {
+        return "LatticeEdge[From: " + this.from + " To: " + this.to + " Pose: " + this.toPos + " Null: " + isNull + "]";
+    }
 }

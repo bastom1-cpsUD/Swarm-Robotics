@@ -22,11 +22,14 @@ public class TimeStepDiffDrive extends MotionModel {
 
     public TimeStepDiffDrive(double commRange) {
         super();
+        this.timeElapsed = 0.0;
+        this.leftAngularVel = 0.0;
+        this.rightAngularVel = 0.0;
         TIME_TO_ESCAPE_CONGESTION = 2* commRange / MAX_LINEAR_SPEED;
     }
 
     public boolean move(OrientedPoint pose, double dt) {
-        if(timeElapsed >= TIME_TO_ESCAPE_CONGESTION) {
+        if(Double.compare(timeElapsed, TIME_TO_ESCAPE_CONGESTION) > 0) {
             timeElapsed = 0.0;
             changeState(0, 0);
             return true;

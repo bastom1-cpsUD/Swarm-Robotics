@@ -154,7 +154,7 @@ public class RobotPanel extends JPanel {
     private void beginSimulation() {
     final long[] lastFrameTime = {System.nanoTime()};
     final long[] lastStateTime = {System.nanoTime()};
-
+    final boolean[] firstStateUpdated = {false};
     Timer simLoop = new Timer(1000 / 30, e -> {
         long current = System.nanoTime();
         double dt = (current - lastFrameTime[0]) / 1_000_000_000.0;
@@ -162,6 +162,7 @@ public class RobotPanel extends JPanel {
 
         // State update — only when a full second has elapsed
         if (current - lastStateTime[0] >= 1_000_000_000L) {
+            firstStateUpdated[0] = true;
             lastStateTime[0] = current;
             for (LatticeRobot robot : robots.values()) {
                 robot.processMessages(); // always completes before move
@@ -172,10 +173,11 @@ public class RobotPanel extends JPanel {
         }
 
         // Movement — always runs after the state block above
-        for (LatticeRobot robot : robots.values()) {
-
-            robot.move(dt);
-        }
+        if(firstStateUpdated[0]) {
+            for (LatticeRobot robot : robots.values()) {
+                robot.move(dt);
+            }
+        }   
         proximityCheckForAllRobots();
         repaint();
     });

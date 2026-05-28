@@ -80,26 +80,32 @@ public class LatticeRobot extends Robot implements Communicatable {
     }
 
     public void executeTimeStep() {
-        if((commsSystem.isRoot() || commsSystem.isAssigned()) && !inCongestedArea) {
+        if(!inCongestedArea) {
             commsSystem.broadcastAssignment();
+            OrientedPoint newAssignment = commsSystem.retrieveAssignmentLocation();
+
+            if(newAssignment == null) {
+            inCongestedArea = true;
+            return;
+        }  
+
+        if(!newAssignment.equals(assignedPosition)) {
+            assignedPosition = newAssignment;
+            motionModel.startMoving();
+        }
         }
     }
 
     @Override
     public void move(double dt) {
-        OrientedPoint newAssignment = commsSystem.retrieveAssignmentLocation();
-        if(newAssignment == null) {
-            inCongestedArea = true;
-        }
-
         if(inCongestedArea == true) {
-            inCongestedArea = !motionModel.move(pose,dt);
+            assignedPosition = pose;
+            boolean completedRepositionMovement = motionModel.move(pose,dt);
+            if(completedRepositionMovement) {
+                inCongestedArea = false;
+                assignedPosition = this.pose;
+            }
             return;
-        }
-
-        if(!newAssignment.equals(assignedPosition)) {
-            assignedPosition = newAssignment;
-            motionModel.startMoving();
         }
 
         motionModel.moveTo(pose, assignedPosition, dt);
