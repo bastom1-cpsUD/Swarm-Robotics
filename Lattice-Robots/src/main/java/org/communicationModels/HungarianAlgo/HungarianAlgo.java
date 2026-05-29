@@ -103,7 +103,7 @@ public class HungarianAlgo {
 }
     
     private boolean allColCovered() {
-        System.out.println("Checking if all columns are covered...");
+        //System.out.println("Checking if all columns are covered...");
         for(int j = 0; j < numCols; j++) {
             if(!coveredCols[j]) {
                 return false;
@@ -117,7 +117,7 @@ public class HungarianAlgo {
      */
     private void reduceMatrix() {
 
-    System.out.println("Reducing matrix...");
+    //System.out.println("Reducing matrix...");
 
     // Row reduction
     for(int i = 0; i < numRows; i++) {
@@ -138,7 +138,7 @@ public class HungarianAlgo {
      * stars zeros once per row & column; acts as drawing lines to eliminate all zeros
      */
     private void starZeros() {
-        System.out.println("Starring zeroes...");
+        //System.out.println("Starring zeroes...");
         
         for(int i = 0; i < numRows; i++) {
             for(int j = 0; j < numCols; j++) {
@@ -150,12 +150,12 @@ public class HungarianAlgo {
         }
 
         // Print out the starred zeroes for debugging
-        System.out.println("Starred zeroes:");
-        for(int i = 0; i < numRows; i++) {
+        //System.out.println("Starred zeroes:");
+        /*for(int i = 0; i < numRows; i++) {
             if(starsCol[i] != -1) {
                 System.out.println("Starred zero at: (" + i + ", " + starsCol[i] + ")");
             }
-        }
+        }*/
     }
 
     /**
@@ -164,7 +164,7 @@ public class HungarianAlgo {
      */
     private int[] primeZeroes() {
 
-    System.out.println("Priming Zeroes...");
+    //System.out.println("Priming Zeroes...");
 
     while(true) {
 
@@ -193,7 +193,7 @@ public class HungarianAlgo {
         // Prime the zero
         primes[row] = col;
 
-        System.out.println("Primed zero at: (" + row + ", " + col + ")");
+        //System.out.println("Primed zero at: (" + row + ", " + col + ")");
 
         int starCol = starsCol[row];
         if (starCol == -1) {

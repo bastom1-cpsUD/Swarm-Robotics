@@ -30,7 +30,7 @@ public final class HungarianMatrixUtils {
         if(rows > cols) {
             dummyValue = INFINITY;
         } else {
-            dummyValue = INFINITY;
+            dummyValue = 0.0;
         }
 
         double[][] padded = new double[size][size];

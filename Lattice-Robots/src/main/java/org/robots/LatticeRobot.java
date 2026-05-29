@@ -28,7 +28,7 @@ public class LatticeRobot extends Robot implements Communicatable {
     private boolean inCongestedArea;
 
     public LatticeRobot(int id, OrientedPoint pose) {
-        super(id, pose, new TimeStepDiffDrive(COMM_RANGE), new TriangularModel());
+        super(id, pose, new TimeStepDiffDrive(), new TriangularModel());
         this.commsSystem = new DecentralizedComms(id, this);
         this.edges = new HashSet<>();
         this.neighbors = new ArrayList<>();
@@ -79,27 +79,30 @@ public class LatticeRobot extends Robot implements Communicatable {
         }
     }
 
-    public void executeTimeStep() {
+    public void executeTimeStep(double timeStep) {
         if(!inCongestedArea) {
             commsSystem.broadcastAssignment();
-            OrientedPoint newAssignment = commsSystem.retrieveAssignmentLocation();
+            OrientedPoint[] assignment = commsSystem.retrieveAssignmentLocation();
+            OrientedPoint parentPose = assignment[0];
+            OrientedPoint newAssignment = assignment[1];
 
+            if(parentPose == null) {
+                assignedPosition = newAssignment;
+                return;
+            }
             if(newAssignment == null) {
-            inCongestedArea = true;
-            return;
-        }  
-
-        if(!newAssignment.equals(assignedPosition)) {
-            assignedPosition = newAssignment;
-            motionModel.startMoving();
-        }
-        }
+                inCongestedArea = true;
+                return;
+            }
+            if(!newAssignment.equals(assignedPosition)) {
+                assignedPosition = ((TimeStepDiffDrive) motionModel).getIntermediatePose(this.pose, parentPose, newAssignment, timeStep);
+                motionModel.startMoving();
+            }
+        }     
     }
-
     @Override
     public void move(double dt) {
         if(inCongestedArea == true) {
-            assignedPosition = pose;
             boolean completedRepositionMovement = motionModel.move(pose,dt);
             if(completedRepositionMovement) {
                 inCongestedArea = false;
@@ -108,6 +111,8 @@ public class LatticeRobot extends Robot implements Communicatable {
             return;
         }
 
-        motionModel.moveTo(pose, assignedPosition, dt);
+        if(motionModel instanceof TimeStepDiffDrive) {
+            motionModel.moveTo(pose, assignedPosition, dt);
+        }
     }
 }

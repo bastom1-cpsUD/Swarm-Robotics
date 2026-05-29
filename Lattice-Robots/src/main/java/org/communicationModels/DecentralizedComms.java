@@ -29,7 +29,7 @@ public class DecentralizedComms extends CommunicationSystem {
     protected ArrayList<LatticeRobot> commPeers;
     protected LatticeEdge assignedEdge;
     protected AuthorityList authorityList;
-    protected final LatticeGraph LATTICE_GRAPH = new SquareLattice();
+    protected static final LatticeGraph LATTICE_GRAPH = new SquareLattice();
 
     public DecentralizedComms(int robotId, LatticeRobot self) {
         this.self = self;
@@ -72,6 +72,7 @@ public class DecentralizedComms extends CommunicationSystem {
         parentId = greatestAuthority.getMostRecentAuthority();
         //Make copy of authority list to avoid cycling
         AuthorityList myAuthority = new AuthorityList(greatestAuthority.getAuthorities());
+        myAuthority.addAuthority(self.getRobotId());
         authorityList = myAuthority;
         incomingMessages.clear();
     }
@@ -96,34 +97,43 @@ public class DecentralizedComms extends CommunicationSystem {
                 AuthorityList msgAuthority = new AuthorityList(this.authorityList.getAuthorities());
                 Message msg = new Message(msgAuthority, (edge == null) ? new LatticeEdge() : outgoingEdges.get(edge));
                 commPeers.get(robot).enqueueMessage(msg);
+
+                //System.out.println("Assigning robot (" +  robot + ") " + commPeers.get(robot).getRobotId() + " to " + ((edge == null) ? new LatticeEdge() : outgoingEdges.get(edge)));
            }
         }
     }
 
-    public OrientedPoint retrieveAssignmentLocation() {
-        if(isRoot()) {
-            return self.getPosition();
-        } else if(!isAssigned()) {
-            return null;
-        }
+    public OrientedPoint[] retrieveAssignmentLocation() {
+        OrientedPoint[] assignment;
+        if(role == Role.root) {
+            assignment = new OrientedPoint[] {null, self.getPosition()};
+        } else if(role == Role.unassignedChild) {
+            assignment = new OrientedPoint[] {null, null};
+            
+        } else {
 
-        LatticeRobot parent = null;
+            LatticeRobot parent = null;
 
-        for(LatticeRobot robot : commPeers) {
-            if(parentId.equals(robot.getRobotId())) {
-                parent = robot;
+            for(LatticeRobot robot : commPeers) {
+                if(parentId.equals(robot.getRobotId())) {
+                    parent = robot;
+                }
             }
+
+            if(parent == null) {
+                System.out.println("I " +self.getRobotId() + "lost connection to " + parentId);
+            }
+
+            //Get transformation of parent that translates local coords to global positions
+            RigidBodyTransformation parentLocalToGlobal = new RigidBodyTransformation(parent.getPosition());
+
+            //Apply transformation of parent to assigned position to get global position of assigned target
+            OrientedPoint assignedLocationGlobal = parentLocalToGlobal.apply(assignedEdge.getToPos());
+        
+            //Do we need to convert to local if this is just for positioning???
+            assignment = new OrientedPoint[] {parent.getPosition(), assignedLocationGlobal};
         }
-
-        //Get transformation of parent that translates local coords to global positions
-        RigidBodyTransformation parentLocalToGlobal = new RigidBodyTransformation(parent.getPosition());
-
-        //Apply transformation of parent to assigned position to get global position of assigned target
-        OrientedPoint assignedLocationGlobal = parentLocalToGlobal.apply(assignedEdge.getToPos());
-    
-        //Do we need to convert to local if this is just for positioning???
-
-        return assignedLocationGlobal;
+        return assignment;
     }
 
     /**

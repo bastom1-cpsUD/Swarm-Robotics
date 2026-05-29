@@ -1,6 +1,7 @@
 package org.motionModels;
 
 import org.graphs.OrientedPoint;
+import org.robots.LatticeRobot;
 
 public class TimeStepDiffDrive extends MotionModel {
     private enum MoveState {
@@ -20,12 +21,12 @@ public class TimeStepDiffDrive extends MotionModel {
     private static final double MAX_ANGULAR_SPEED = MAX_LINEAR_SPEED / WHEEL_RADIUS;
     private final double TIME_TO_ESCAPE_CONGESTION;
 
-    public TimeStepDiffDrive(double commRange) {
+    public TimeStepDiffDrive() {
         super();
         this.timeElapsed = 0.0;
         this.leftAngularVel = 0.0;
         this.rightAngularVel = 0.0;
-        TIME_TO_ESCAPE_CONGESTION = 2* commRange / MAX_LINEAR_SPEED;
+        TIME_TO_ESCAPE_CONGESTION = 2* LatticeRobot.COMM_RANGE / MAX_LINEAR_SPEED;
     }
 
     public boolean move(OrientedPoint pose, double dt) {
@@ -47,7 +48,40 @@ public class TimeStepDiffDrive extends MotionModel {
         return false;
     }
 
+
+    public OrientedPoint getIntermediatePose(OrientedPoint currentPose, OrientedPoint parentPose, OrientedPoint target, double timeStep) {
+        double r1 = MAX_LINEAR_SPEED * timeStep;
+        double r2 = LatticeRobot.COMM_RANGE - MAX_LINEAR_SPEED * timeStep;
+        
+        OrientedPoint candidateForSelfDisk = projectTargetToReachableDisk(currentPose, target, r1);
+
+        OrientedPoint candidateForParentDisk = projectTargetToReachableDisk(parentPose, candidateForSelfDisk, r2);
+
+        return candidateForParentDisk;
+    }
+
+    private OrientedPoint projectTargetToReachableDisk(OrientedPoint current, OrientedPoint target, double radius) {
+        double distance = current.distance(target);
+
+        if(distance < radius) {
+            return target;
+        }
+
+        double scale = radius / distance;
+        double dx = target.x - current.x;
+        double dy = target.y - current.y;
+
+        double x = current.x + dx * scale;
+        double y = current.y + dy * scale;
+
+        double angle = Math.atan2(target.y - y, target.x - x);
+
+        return new OrientedPoint(x,y,angle);
+
+    }
+
     public boolean moveTo(OrientedPoint currentPose, OrientedPoint newPose, double dt) {
+        
         switch(moveState) {
 
             case ROTATE_TO_POINT:

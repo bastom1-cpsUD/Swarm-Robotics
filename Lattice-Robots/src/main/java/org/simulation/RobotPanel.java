@@ -59,6 +59,9 @@ public class RobotPanel extends JPanel {
                 if (hitRobot != null) {
                     dragging = true;
 
+                    //FOR TESTING ONLY
+                    System.out.println(hitRobot.getRobotId());
+
                     offsetX = e.getX() - hitRobot.getPosition().x;
                     offsetY = e.getY() - hitRobot.getPosition().y;
 
@@ -131,6 +134,7 @@ public class RobotPanel extends JPanel {
                 //Import robot data on 'K' key press
                 if(e.getKeyCode() == KeyEvent.VK_K) {
                     if(readDataFromJSON()) {
+                        proximityCheckForAllRobots();
                         System.out.println("Robot data imported from output/robot_data!");
                         repaint();
                     }
@@ -152,23 +156,27 @@ public class RobotPanel extends JPanel {
     }
 
     private void beginSimulation() {
+    final double[] timeSinceStart = {0.0};
     final long[] lastFrameTime = {System.nanoTime()};
     final long[] lastStateTime = {System.nanoTime()};
     final boolean[] firstStateUpdated = {false};
     Timer simLoop = new Timer(1000 / 30, e -> {
         long current = System.nanoTime();
         double dt = (current - lastFrameTime[0]) / 1_000_000_000.0;
+        timeSinceStart[0] += dt;
         lastFrameTime[0] = current;
 
         // State update — only when a full second has elapsed
         if (current - lastStateTime[0] >= 1_000_000_000L) {
+            double timeStep = current-lastStateTime[0];
+            System.out.println("Time elapsed: " + timeSinceStart[0]);
             firstStateUpdated[0] = true;
             lastStateTime[0] = current;
             for (LatticeRobot robot : robots.values()) {
                 robot.processMessages(); // always completes before move
             }
             for (LatticeRobot robot : robots.values()) {
-                robot.executeTimeStep();
+                robot.executeTimeStep(timeStep);
             }
         }
 
