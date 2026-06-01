@@ -5,6 +5,7 @@ import org.graphs.LatticeGraph;
 import org.graphs.OrientedPoint;
 import org.graphs.RigidBodyTransformation;
 import org.robots.LatticeRobot;
+import org.simulation.Edge;
 import org.communicationModels.HungarianAlgo.HungarianAlgo;
 import org.communicationModels.HungarianAlgo.HungarianMatrixUtils;
 import org.graphs.LatticeEdge;
@@ -61,7 +62,8 @@ public class DecentralizedComms extends CommunicationSystem {
         }
 
         //Step 4: Adopt greatest authority or retain own authority
-        if(ownAuthority.equals(greatestAuthority)) { 
+        if(ownAuthority.equals(greatestAuthority)) {
+            self.clearEdges();
             role = Role.root;
             parentId = -1;
             assignedEdge = new LatticeEdge();
@@ -72,6 +74,12 @@ public class DecentralizedComms extends CommunicationSystem {
         
         role = (assignedEdge.isNull()) ? Role.unassignedChild : Role.assignedChild;
         parentId = greatestAuthority.getMostRecentAuthority();
+        
+        self.clearEdges();
+        if(Role.assignedChild.equals(role)) {
+            self.addEdge(new Edge(self.getRobotId(), parentId));
+            self.addEdge(new Edge(parentId, self.getRobotId()));
+        }
         //Make copy of authority list to avoid cycling
         AuthorityList myAuthority = new AuthorityList(greatestAuthority.getAuthorities());
         myAuthority.addAuthority(self.getRobotId());

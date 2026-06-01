@@ -42,22 +42,25 @@ public class LatticeRobot extends Robot implements Communicatable {
     }
 
     public void addNeighbor(LatticeRobot other) {
-        //Check if edge already exists to prevent duplicates
-        boolean edgeExists = this.edges.stream().anyMatch(edge -> edge.getToId() == other.getRobotId());
+        this.neighbors.add(other);
 
-        if(!edgeExists) {
-            this.edges.add(new Edge(this.getRobotId(), other.getRobotId()));
-            other.edges.add(new Edge(other.getRobotId(), this.getRobotId()));
-            this.neighbors.add(other);
-            other.neighbors.add(this);
-        }
     }
 
     public void removeNeighbor(LatticeRobot neighbor) {
-        neighbor.edges.removeIf(edge -> edge.getToId() == this.getRobotId());
-        this.edges.removeIf(edge -> edge.getToId() == neighbor.getRobotId());
         this.neighbors.remove(neighbor);
-        neighbor.neighbors.remove(this);
+
+    }
+
+    public void addEdge(Edge edge) {
+        this.edges.add(edge);
+    }
+
+    public void clearEdges() {
+        this.edges.clear();
+    }
+
+    public void clearNeighbors() {
+        this.neighbors.clear();
     }
 
     public Set<Edge> getEdges() {

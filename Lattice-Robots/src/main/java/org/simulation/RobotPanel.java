@@ -204,8 +204,9 @@ public class RobotPanel extends JPanel {
             robot.getEdges().forEach(edge -> {
                 //Retrieve the 'to' robot
                 LatticeRobot to = robots.get(edge.getToId());
+                LatticeRobot from = robots.get(edge.getFromId());
                 //Draw the edge
-                edge.draw(g2d, robot, to);
+                edge.draw(g2d, from, to);
             });
         }
         
@@ -458,6 +459,7 @@ public class RobotPanel extends JPanel {
     
     public static void proximityCheckForAllRobots() {
         for(LatticeRobot robot : robots.values()) {
+            robot.clearNeighbors();
             for(LatticeRobot other : robots.values()) {
                 if(robot.getRobotId() != other.getRobotId()) {
                     double distance = robot.getPosition().distance(other.getPosition());
