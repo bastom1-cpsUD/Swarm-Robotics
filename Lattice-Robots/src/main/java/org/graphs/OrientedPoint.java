@@ -17,6 +17,11 @@ public class OrientedPoint extends java.awt.geom.Point2D.Double {
         this.orientation = orientation;
     }
 
+    /**
+     * Copy constructor to create a new OrientedPoint from an existing one.
+     * @param pose the OrientedPoint to copy
+     * @return a new OrientedPoint with the same coordinates and orientation as the input
+     */
     public OrientedPoint(OrientedPoint pose) {
         this.x = pose.x;
         this.y = pose.y;

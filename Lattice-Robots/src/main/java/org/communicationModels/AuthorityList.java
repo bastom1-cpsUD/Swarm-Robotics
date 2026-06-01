@@ -91,7 +91,11 @@ public class AuthorityList implements Comparable<AuthorityList> {
     public boolean isRoot(int authorityId) {
         return getRootAuthority() == authorityId;
     }
-    
+    /**
+     * Compares this AuthorityList with another AuthorityList for ordering.
+     * @param other the other AuthorityList to compare with
+     * @return a negative integer, zero, or a positive integer as this object is less than, equal to, or greater than the specified object
+     */
     @Override
     public boolean equals(Object obj) {
         if(this == obj) return true;
@@ -112,6 +116,15 @@ public class AuthorityList implements Comparable<AuthorityList> {
         return authorities.hashCode();
     }
 
+    /**
+     * Compares this AuthorityList with another AuthorityList for ordering based on the following criteria:
+     * 1. The AuthorityList with the smaller root authority ID is considered higher.
+     * 2. If both AuthorityLists have the same root authority ID, the one with fewer total authorities is considered higher.
+     * 3. If both AuthorityLists have the same root authority ID and the same number of authorities, the one with the smaller most recently added authority ID is considered higher.
+     * If all criteria are the same, the AuthorityLists are considered equal.
+     * @param other the other AuthorityList to compare with
+     * @return a negative integer, zero, or a positive integer as this object is less
+     */
     @Override
     public int compareTo(AuthorityList other) {
         //Case 1: A1 has higher authority than A2 if A1 root is greater than A2 root

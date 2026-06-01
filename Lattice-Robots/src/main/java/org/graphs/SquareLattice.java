@@ -3,6 +3,8 @@ package org.graphs;
 import java.util.ArrayList;
 
 public class SquareLattice extends LatticeGraph {
+    private final double EDGE_LENGTH = 50.0;
+
     public SquareLattice() {
         super();
         // Define the vertice of the square lattice
@@ -10,10 +12,10 @@ public class SquareLattice extends LatticeGraph {
 
         // Define the edges of the square lattice with appropriate transformations
         ArrayList<LatticeEdge> v0edges = new ArrayList<>();
-        LatticeEdge e1 = new LatticeEdge(v0, v0, new OrientedPoint(0,50,0)); // UP
-        LatticeEdge e2 = new LatticeEdge(v0, v0,  new OrientedPoint(50, 0, 0)); // RIGHT
-        LatticeEdge e3 = new LatticeEdge(v0, v0, new OrientedPoint(0, -50, 0)); // DOWN
-        LatticeEdge e4 = new LatticeEdge(v0, v0, new OrientedPoint(-50, 0, 0)); // LEFT        
+        LatticeEdge e1 = new LatticeEdge(v0, v0, new OrientedPoint(0, EDGE_LENGTH, 0)); // UP
+        LatticeEdge e2 = new LatticeEdge(v0, v0,  new OrientedPoint(EDGE_LENGTH, 0, 0)); // RIGHT
+        LatticeEdge e3 = new LatticeEdge(v0, v0, new OrientedPoint(0, -EDGE_LENGTH, 0)); // DOWN
+        LatticeEdge e4 = new LatticeEdge(v0, v0, new OrientedPoint(-EDGE_LENGTH, 0, 0)); // LEFT        
 
         v0edges.add(e1);
         v0edges.add(e2);

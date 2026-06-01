@@ -1,9 +1,20 @@
 package org.graphs;
 
 public class Vertex {
+    /**
+     * The unique identifier for this vertex, which can be used to distinguish it from other vertices within the graph.
+     */
     private final int ID;
+    /**
+     * The relative position and orientation of this vertex within the lattice graph.
+     */
     private final OrientedPoint POSE_IN_GRAPH;
 
+    /**
+     * Constructs a vertex with a specified ID and pose within the lattice graph.
+     * @param id the unique identifier for this vertex
+     * @param pose the relative position and orientation of this vertex within the lattice graph
+     */
     public Vertex(int id, OrientedPoint pose) {
         this.ID = id;
         this.POSE_IN_GRAPH= pose;

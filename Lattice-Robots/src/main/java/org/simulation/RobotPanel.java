@@ -168,13 +168,13 @@ public class RobotPanel extends JPanel {
 
         // State update — only when a full second has elapsed
         if (current - lastStateTime[0] >= 1_000_000_000L) {
-            double timeStep = current-lastStateTime[0];
+            double timeStep = (current-lastStateTime[0]) / 1_000_000_000.0;
             System.out.println("Time elapsed: " + timeSinceStart[0]);
             firstStateUpdated[0] = true;
             lastStateTime[0] = current;
-            for (LatticeRobot robot : robots.values()) {
-                robot.processMessages(); // always completes before move
-            }
+
+            proximityCheckForAllRobots();
+
             for (LatticeRobot robot : robots.values()) {
                 robot.executeTimeStep(timeStep);
             }

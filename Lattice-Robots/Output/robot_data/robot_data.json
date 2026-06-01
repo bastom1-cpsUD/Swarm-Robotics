@@ -1,67 +1,23 @@
 {
   "robots": [
-    {
-      "id": 1,
-      "x": 480,
-      "y": 480,
-      "orientation": 0.00
-    },
-    {
-      "id": 2,
-      "x": 520,
-      "y": 470,
-      "orientation": 0.15
-    },
-    {
-      "id": 3,
-      "x": 560,
-      "y": 490,
-      "orientation": 0.30
-    },
-    {
-      "id": 4,
-      "x": 600,
-      "y": 500,
-      "orientation": 0.45
-    },
-    {
-      "id": 5,
-      "x": 640,
-      "y": 520,
-      "orientation": 0.60
-    },
-    {
-      "id": 6,
-      "x": 470,
-      "y": 540,
-      "orientation": 0.75
-    }
+    { "id": 1, "x": 220, "y": 240, "orientation": 0.45 },
+    { "id": 2, "x": 310, "y": 210, "orientation": 1.82 },
+    { "id": 3, "x": 390, "y": 280, "orientation": 3.14 },
+    { "id": 4, "x": 280, "y": 360, "orientation": 5.27 },
+    { "id": 5, "x": 460, "y": 340, "orientation": 2.36 },
+    { "id": 6, "x": 520, "y": 250, "orientation": 0.91 },
+    { "id": 7, "x": 410, "y": 450, "orientation": 4.58 },
+    { "id": 8, "x": 550, "y": 400, "orientation": 1.47 }
   ],
   "edges": [],
   "trust_levels": [
-    {
-      "id": 1,
-      "trustLevel": "Friendly"
-    },
-    {
-      "id": 2,
-      "trustLevel": "Friendly"
-    },
-    {
-      "id": 3,
-      "trustLevel": "Friendly"
-    },
-    {
-      "id": 4,
-      "trustLevel": "Friendly"
-    },
-    {
-      "id": 5,
-      "trustLevel": "Friendly"
-    },
-    {
-      "id": 6,
-      "trustLevel": "Friendly"
-    }
+    { "id": 1, "trustLevel": "Friendly" },
+    { "id": 2, "trustLevel": "Friendly" },
+    { "id": 3, "trustLevel": "Friendly" },
+    { "id": 4, "trustLevel": "Friendly" },
+    { "id": 5, "trustLevel": "Friendly" },
+    { "id": 6, "trustLevel": "Friendly" },
+    { "id": 7, "trustLevel": "Friendly" },
+    { "id": 8, "trustLevel": "Friendly" }
   ]
 }

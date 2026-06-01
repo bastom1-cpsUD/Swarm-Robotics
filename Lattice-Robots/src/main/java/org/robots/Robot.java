@@ -32,31 +32,34 @@ public class Robot implements Movable, Drawable {
         this.pose = newPose;
     }
 
+    /** {@inheritDoc} */
     @Override
     public void move(double dt) {
         motionModel.move(pose, dt);
     }
 
+    /** {@inheritDoc} */
     @Override
     public void startMoving() {
         motionModel.startMoving();
     }
-
+    /** {@inheritDoc} */
     @Override
     public boolean moveTo(OrientedPoint target, double dt) {
         return motionModel.moveTo(pose, target, dt);
     }
 
+    /** {@inheritDoc} */
     @Override
     public double getDistanceTraveled() {
         return motionModel.getDistanceTraveled();
     }
-
+    /** {@inheritDoc} */
     @Override
     public Shape draw() {
         return drawingModel.draw(pose);
     }
-
+    /** {@inheritDoc} */
     @Override 
     public boolean contains(int x, int y) {
         return  drawingModel.contains(pose, x, y);

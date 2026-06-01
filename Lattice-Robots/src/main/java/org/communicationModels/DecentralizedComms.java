@@ -10,6 +10,7 @@ import org.communicationModels.HungarianAlgo.HungarianMatrixUtils;
 import org.graphs.LatticeEdge;
 import org.graphs.SquareLattice;
 import org.graphs.Vertex;
+import org.graphs.HexagonLattice;
 
 /**
  * A Decentralized communication system based on the proposed methodology outlined in Song & OKane 2014
@@ -40,6 +41,7 @@ public class DecentralizedComms extends CommunicationSystem {
         trustLevel = TrustLevel.Friendly;
     }
 
+    /** {@inheritDoc} */
     @Override
     public void processMessages() {
         //Step 1: Discard message where self appears in the authority list
@@ -77,6 +79,9 @@ public class DecentralizedComms extends CommunicationSystem {
         incomingMessages.clear();
     }
 
+    /**
+     * Broadcasts all assignments determined by the robot's current role and authority during the time step.
+     */
     public void broadcastAssignment() {
         if(!isAssigned() && !isRoot() || commPeers.isEmpty()) {
             return;
@@ -103,6 +108,11 @@ public class DecentralizedComms extends CommunicationSystem {
         }
     }
 
+    /**
+     * Provides a list with the the global position of the parent robot and the global position of the assigned edge destination for the robot to use in its positioning and motion planning.
+     * @return A list, whose first element is the global position of the parent robot (or null if root) and second element is the global position of the assigned edge destination
+     *          (or null if an unassigned child without an assigned edge)
+     */
     public OrientedPoint[] retrieveAssignmentLocation() {
         OrientedPoint[] assignment;
         if(role == Role.root) {
@@ -133,9 +143,10 @@ public class DecentralizedComms extends CommunicationSystem {
             //Do we need to convert to local if this is just for positioning???
             assignment = new OrientedPoint[] {parent.getPosition(), assignedLocationGlobal};
         }
+
         return assignment;
     }
-
+    
     /**
      * Determines whether the robot is a root robot within the authority tree
      * @return status as a root
@@ -143,11 +154,18 @@ public class DecentralizedComms extends CommunicationSystem {
     public boolean isRoot() {
         return role == Role.root;
     }
-
+    /**
+     * Determines whether the robot is an assigned child within the authority tree
+     * @return
+     */
     public boolean isAssigned() {
         return role == Role.assignedChild;
     }
 
+    /**
+     * Syncs communication peers with the provided list of neighboring robots. Should be called at the beginning of each time step to ensure proper communication amongst neighbors.
+     * @param neighbors
+     */
     public void syncPeers(ArrayList<LatticeRobot> neighbors) {
         if(neighbors == null || neighbors.isEmpty()) {
             this.commPeers = new ArrayList<>();
@@ -155,12 +173,32 @@ public class DecentralizedComms extends CommunicationSystem {
         this.commPeers = neighbors;
     }
 
+    /**
+     * Returns the current trust level of the robot.
+     * @return the current trust level
+     */
     public TrustLevel getTrustLevel() {
         return trustLevel;
     }
 
+    /**
+     * Sets the trust level of the robot to the specified value.
+     * @param trust
+     */
     public void setTrustLevel(TrustLevel trust) {
         this.trustLevel = trust;
+    }
+
+    /**
+     * Resets the communication state of the robot, clearing all role, authority, and assignment information.
+     */
+    public void resetCommunicationState() {
+        this.role = null;
+        parentId = -1;
+        commPeers = new ArrayList<>();
+        assignedEdge = new LatticeEdge();
+        authorityList = new AuthorityList();
+        incomingMessages.clear();
     }
 
     private int[][] assignVertices() {

@@ -6,12 +6,15 @@ import java.awt.Polygon;
 
 public class TriangularModel extends DrawingModel{
     
+    /**
+     * The size of the sides of the triangle representing the robot.
+     */
     private static final double ROBOT_SIZE = 30;
 
     public TriangularModel() {
         currentModel = new Polygon();
     }
-
+    /** {@inheritDoc} */
     @Override
     public Shape draw(OrientedPoint position) {
         Polygon p = (Polygon) currentModel;
@@ -49,6 +52,8 @@ public class TriangularModel extends DrawingModel{
         return p;
     }
 
+    /** {@inheritDoc} */
+    @Override
     public boolean contains(OrientedPoint position, int x, int y) {
         draw(position);
         return currentModel.contains(x, y);

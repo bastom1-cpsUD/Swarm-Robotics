@@ -3,7 +3,10 @@ package org.motionModels;
 import org.graphs.OrientedPoint;
 import org.robots.LatticeRobot;
 
-public class TimeStepDiffDrive extends MotionModel {
+/**
+ * A class that represents a differential drive motion model for a robot, breaking down motions into discrete time steps
+ */
+public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel{
     private enum MoveState {
         ROTATE_TO_POINT,
         TRANSLATE,
@@ -20,6 +23,7 @@ public class TimeStepDiffDrive extends MotionModel {
     private static final double DISTANCE_BETWEEN_WHEELS = 30;
     private static final double MAX_ANGULAR_SPEED = MAX_LINEAR_SPEED / WHEEL_RADIUS;
     private final double TIME_TO_ESCAPE_CONGESTION;
+    public static final double ASSIGNMENT_CHANGE_THRESHOLD = MAX_LINEAR_SPEED * 0.5;
 
     public TimeStepDiffDrive() {
         super();
@@ -47,7 +51,6 @@ public class TimeStepDiffDrive extends MotionModel {
         timeElapsed += dt;
         return false;
     }
-
 
     public OrientedPoint getIntermediatePose(OrientedPoint currentPose, OrientedPoint parentPose, OrientedPoint target, double timeStep) {
         double r1 = MAX_LINEAR_SPEED * timeStep;
@@ -193,5 +196,9 @@ public class TimeStepDiffDrive extends MotionModel {
 
     private boolean isZero(double value) {
         return Math.abs(value) < 1e-9;
+    }
+
+    public double getAssignmentChangeThreshold() {
+        return ASSIGNMENT_CHANGE_THRESHOLD;
     }
 }
