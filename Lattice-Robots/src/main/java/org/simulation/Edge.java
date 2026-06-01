@@ -1,4 +1,4 @@
-package org.robots;
+package org.simulation;
 
 import java.awt.Graphics2D;
 import java.awt.Polygon;
@@ -6,6 +6,8 @@ import java.awt.Shape;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
+
+import org.robots.LatticeRobot;
 
 public class Edge {
     private int fromId;

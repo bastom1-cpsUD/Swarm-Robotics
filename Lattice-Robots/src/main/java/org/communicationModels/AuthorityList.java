@@ -1,4 +1,4 @@
-package org.robots;
+package org.communicationModels;
 import java.util.ArrayList;
 /**
  * A class to manage a list of authority IDs for a robot, with the first ID being the root authority, and the most
@@ -82,7 +82,20 @@ public class AuthorityList implements Comparable<AuthorityList> {
     public boolean contains(int authorityId) {
         return authorities.contains(authorityId);
     }
-    
+
+    /**
+     * Checks is the authorityId provided is the root of the authority list
+     * @param authorityId
+     * @return  true if the first authority in the list is the root, false otherwise
+     */
+    public boolean isRoot(int authorityId) {
+        return getRootAuthority() == authorityId;
+    }
+    /**
+     * Compares this AuthorityList with another AuthorityList for ordering.
+     * @param other the other AuthorityList to compare with
+     * @return a negative integer, zero, or a positive integer as this object is less than, equal to, or greater than the specified object
+     */
     @Override
     public boolean equals(Object obj) {
         if(this == obj) return true;
@@ -103,12 +116,21 @@ public class AuthorityList implements Comparable<AuthorityList> {
         return authorities.hashCode();
     }
 
+    /**
+     * Compares this AuthorityList with another AuthorityList for ordering based on the following criteria:
+     * 1. The AuthorityList with the smaller root authority ID is considered higher.
+     * 2. If both AuthorityLists have the same root authority ID, the one with fewer total authorities is considered higher.
+     * 3. If both AuthorityLists have the same root authority ID and the same number of authorities, the one with the smaller most recently added authority ID is considered higher.
+     * If all criteria are the same, the AuthorityLists are considered equal.
+     * @param other the other AuthorityList to compare with
+     * @return a negative integer, zero, or a positive integer as this object is less
+     */
     @Override
     public int compareTo(AuthorityList other) {
         //Case 1: A1 has higher authority than A2 if A1 root is greater than A2 root
-        if(this.authorities.get(0) > other.authorities.get(0)) {
+        if(this.authorities.get(0) < other.authorities.get(0)) {
             return -1;   
-        } else if(this.authorities.get(0) < other.authorities.get(0)) {
+        } else if(this.authorities.get(0) > other.authorities.get(0)) {
             return 1;
         }
         //Case 2: If A1 and A2 have the same root, but A1 has fewer authorities than A2, then A1 is higher than A2
@@ -118,9 +140,9 @@ public class AuthorityList implements Comparable<AuthorityList> {
             return 1;
 
         //Case 3: If A1 and A2 have the same root and the same number of authorities, but A1's most recently added authority is greater than A2'
-        } else if(this.authorities.get(this.authorities.size() - 1) > other.authorities.get(other.authorities.size() - 1)) {
-            return -1;
         } else if(this.authorities.get(this.authorities.size() - 1) < other.authorities.get(other.authorities.size() - 1)) {
+            return -1;
+        } else if(this.authorities.get(this.authorities.size() - 1) > other.authorities.get(other.authorities.size() - 1)) {
             return 1;
         }
         return 0;

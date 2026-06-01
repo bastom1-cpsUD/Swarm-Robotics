@@ -12,15 +12,25 @@ public abstract class LatticeGraph {
     public LatticeGraph() {
         edges = new HashMap<>();
     }
-
+    /**
+     * Returns a list of all vertices in the lattice graph.
+     * @return
+     */
     public ArrayList<Vertex> getVertices() {
         return edges.keySet().parallelStream().collect(Collectors.toCollection(ArrayList::new));
     }
-
+    /**
+     * Returns a list of all the outgoing edges from a given vertex in the lattice graph.
+     * @param vertex the vertex for which to retrieve outgoing edges
+     * @return a list of all outgoing edges from the specified vertex, or an empty list if the vertex has no outgoing edges or is not represented in the graph
+     */
     public ArrayList<LatticeEdge> getOutgoingEdges(Vertex vertex) {
         return edges.getOrDefault(vertex, new ArrayList<>());
     }
-
+    /**
+     * Returns the primary vertex of the lattice graph, which serves as the beginning point of the graph for formation purposes.
+     * @return the primary vertex of the lattice graph, which is the first vertex in the graph's vertex set
+     */
     public Vertex getPrimaryVertex() {
         return (Vertex) edges.keySet().toArray()[0]; // Assuming the first vertex is the primary vertex
     }

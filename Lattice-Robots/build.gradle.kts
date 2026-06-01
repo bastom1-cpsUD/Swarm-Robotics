@@ -42,7 +42,7 @@ java {
 
 application {
     // Define the main class for the application.
-    mainClass.set("org.robots.RobotPanel")
+    mainClass.set("org.simulation.RobotPanel")
 }
 
 
@@ -55,7 +55,7 @@ tasks.jar {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
     manifest {
-        attributes("Main-Class" to "org.robots.RobotPanel")
+        attributes("Main-Class" to "org.simulation.RobotPanel")
     }
     from({
         configurations.runtimeClasspath.get().map { file ->

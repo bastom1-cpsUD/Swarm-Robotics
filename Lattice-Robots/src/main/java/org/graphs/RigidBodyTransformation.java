@@ -25,6 +25,10 @@ public class RigidBodyTransformation {
         });
     }
 
+    /**
+     * Constructs a transformation that maps the origin to the given point
+     * @param to a given point in 2D space with an orientation
+     */
     public RigidBodyTransformation(OrientedPoint to) {
         double cosTheta = Math.cos(to.getOrientation());
         double sinTheta = Math.sin(to.getOrientation());
@@ -48,6 +52,11 @@ public class RigidBodyTransformation {
         return new RigidBodyTransformation(inverseMatrix);
     }
 
+    /**
+     * Applies a transformation via matrix multiplication
+     * @param point the point that undergoes matrix multiplication
+     * @return the transformed point
+     */
     public OrientedPoint apply(OrientedPoint point) {
         Matrix pointMatrix = new Matrix(new double[][] {{point.x}, {point.y}, {1}});
         Matrix result = this.matrix.times(pointMatrix);
@@ -57,6 +66,11 @@ public class RigidBodyTransformation {
         return new OrientedPoint(x, y, orientation);
     }
 
+    /**
+     * Determines whether the a provided Rigid Body Transformation is an inverse
+     * @param other a second Rigid Body Transformation
+     * @return whether the provided transformation is an inverse
+     */
     public boolean isInverse(RigidBodyTransformation other) {
         Matrix result = this.matrix.times(other.matrix);
 

@@ -1,4 +1,4 @@
-package org.robots;
+package org.simulation;
 
 import javax.swing.JPanel;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -17,14 +17,16 @@ import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.time.LocalDateTime;
+
+import org.robots.LatticeRobot;
+import org.communicationModels.TrustLevel;
 import org.graphs.OrientedPoint;
 
 public class RobotPanel extends JPanel {
-    
-    private static final int proximityThreshold = 200; // Distance threshold for proximity-based edge creation
     private static Map<Integer, LatticeRobot> robots;
     private static LatticeRobot selectedRobot = null;
     private static boolean dragging = false;
@@ -57,12 +59,15 @@ public class RobotPanel extends JPanel {
                 if (hitRobot != null) {
                     dragging = true;
 
+                    //FOR TESTING ONLY
+                    System.out.println(hitRobot.getRobotId());
+
                     offsetX = e.getX() - hitRobot.getPosition().x;
                     offsetY = e.getY() - hitRobot.getPosition().y;
 
                     // Bring to front by re-inserting into the map
-                    robots.remove(hitRobot.getAuthorityId());
-                    robots.put(hitRobot.getAuthorityId(), hitRobot);
+                    robots.remove(hitRobot.getRobotId());
+                    robots.put(hitRobot.getRobotId(), hitRobot);
 
                     selectedRobot = hitRobot;
                     repaint();
@@ -129,6 +134,7 @@ public class RobotPanel extends JPanel {
                 //Import robot data on 'K' key press
                 if(e.getKeyCode() == KeyEvent.VK_K) {
                     if(readDataFromJSON()) {
+                        proximityCheckForAllRobots();
                         System.out.println("Robot data imported from output/robot_data!");
                         repaint();
                     }
@@ -138,12 +144,54 @@ public class RobotPanel extends JPanel {
                     displayRobotProximity = !displayRobotProximity;
                     repaint();
                 }
+
+                if(e.getKeyCode() == KeyEvent.VK_SPACE) {
+                    beginSimulation();
+                }
             }
 
             @Override
             public void keyReleased(java.awt.event.KeyEvent e) {}
         });
     }
+
+    private void beginSimulation() {
+    final double[] timeSinceStart = {0.0};
+    final long[] lastFrameTime = {System.nanoTime()};
+    final long[] lastStateTime = {System.nanoTime()};
+    final boolean[] firstStateUpdated = {false};
+    Timer simLoop = new Timer(1000 / 30, e -> {
+        long current = System.nanoTime();
+        double dt = (current - lastFrameTime[0]) / 1_000_000_000.0;
+        timeSinceStart[0] += dt;
+        lastFrameTime[0] = current;
+
+        // State update — only when a full second has elapsed
+        if (current - lastStateTime[0] >= 1_000_000_000L) {
+            double timeStep = (current-lastStateTime[0]) / 1_000_000_000.0;
+            System.out.println("Time elapsed: " + timeSinceStart[0]);
+            firstStateUpdated[0] = true;
+            lastStateTime[0] = current;
+
+            proximityCheckForAllRobots();
+
+            for (LatticeRobot robot : robots.values()) {
+                robot.executeTimeStep(timeStep);
+            }
+        }
+
+        // Movement — always runs after the state block above
+        if(firstStateUpdated[0]) {
+            for (LatticeRobot robot : robots.values()) {
+                robot.move(dt);
+            }
+        }   
+        proximityCheckForAllRobots();
+        repaint();
+    });
+
+    simLoop.start();
+}
 
     protected void paintComponent(java.awt.Graphics g) {
         super.paintComponent(g);
@@ -160,8 +208,11 @@ public class RobotPanel extends JPanel {
                 edge.draw(g2d, robot, to);
             });
         }
+        
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.setColor(Color.BLACK);
         for(LatticeRobot robot : robots.values()) {
-            robot.draw(g2d);
+            g2d.fill(robot.draw());
         }
     }
 
@@ -222,7 +273,7 @@ public class RobotPanel extends JPanel {
                 OrientedPoint robotPose = robot.getPosition();
 
                 //Add data to node for single robot
-                robotNode.put("id", robot.getAuthorityId());
+                robotNode.put("id", robot.getRobotId());
                 robotNode.put("x", robotPose.x);
                 robotNode.put("y", robotPose.y);
                 robotNode.put("orientation", robotPose.getOrientation());
@@ -276,7 +327,7 @@ public class RobotPanel extends JPanel {
                 ObjectNode trustNode = mapper.createObjectNode();
 
                 //Add data to node
-                trustNode.put("id", robot.getAuthorityId());
+                trustNode.put("id", robot.getRobotId());
                 trustNode.put("trustLevel", robot.getTrustLevel().toString());
 
                 //Add trust node to trust array
@@ -408,9 +459,9 @@ public class RobotPanel extends JPanel {
     public static void proximityCheckForAllRobots() {
         for(LatticeRobot robot : robots.values()) {
             for(LatticeRobot other : robots.values()) {
-                if(robot.getAuthorityId() != other.getAuthorityId()) {
+                if(robot.getRobotId() != other.getRobotId()) {
                     double distance = robot.getPosition().distance(other.getPosition());
-                    if(distance <= proximityThreshold) {
+                    if(distance <= LatticeRobot.COMM_RANGE) {
                         robot.addNeighbor(other);
                     } else {
                         robot.removeNeighbor(other);
@@ -428,6 +479,8 @@ public class RobotPanel extends JPanel {
         for(LatticeRobot robot: robots.values()) {
             double x = robot.getPosition().x;
             double y = robot.getPosition().y;
+
+            double proximityThreshold = LatticeRobot.COMM_RANGE;
 
             Ellipse2D.Double proximityCircle = new Ellipse2D.Double(x - proximityThreshold, y - proximityThreshold, proximityThreshold * 2, proximityThreshold * 2);
 
