@@ -1,6 +1,10 @@
 package org.communicationModels;
 
+import java.sql.Time;
 import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.PriorityQueue;
+
 import org.graphs.LatticeGraph;
 import org.graphs.OrientedPoint;
 import org.graphs.RigidBodyTransformation;
@@ -11,6 +15,7 @@ import org.communicationModels.HungarianAlgo.HungarianMatrixUtils;
 import org.graphs.LatticeEdge;
 import org.graphs.SquareLattice;
 import org.graphs.Vertex;
+import org.motionModels.TimeStepDiffDrive;
 import org.graphs.HexagonLattice;
 
 /**
@@ -34,6 +39,7 @@ public class DecentralizedComms extends CommunicationSystem {
     protected static final LatticeGraph LATTICE_GRAPH = new SquareLattice();
 
     public DecentralizedComms(int robotId, LatticeRobot self) {
+        super(new PriorityQueue<>(), new LinkedList<>());
         this.self = self;
         this.parentId = -1;
         this.commPeers = new ArrayList<LatticeRobot>();
@@ -51,18 +57,30 @@ public class DecentralizedComms extends CommunicationSystem {
         //Step 2: Form own authority list composed of own id
         AuthorityList ownAuthority = new AuthorityList(self.getRobotId());
         AuthorityList greatestAuthority = ownAuthority;
-        
-        //Step 3: For the remaining messages, compare own authority list with the authority list in the message. 
-        for(Message msg : incomingMessages) {
-            AuthorityList msgAuthority = msg.getAuthority();
-            if(msgAuthority.compareTo(greatestAuthority) < 0) {
-                greatestAuthority = msgAuthority;
-                assignedEdge = msg.getAssignment();
+
+        //Step 3: Iterate through messages and determine greatest authority and corresponding assignment
+        boolean heardStrongerAuthority = false;
+        while(!incomingMessages.isEmpty()) {
+            Message currentMessage = incomingMessages.remove();
+            
+            if(currentMessage.getAuthority().compareTo(ownAuthority) > 0) {
+                continue; // Skip messages with lesser authority 
             }
+
+            heardStrongerAuthority = true;
+
+            if(currentMessage.getAssignment().isNull()) {
+                continue;
+            }
+
+            greatestAuthority = currentMessage.getAuthority();
+            assignedEdge = currentMessage.getAssignment();
+            break;
         }
 
+
         //Step 4: Adopt greatest authority or retain own authority
-        if(ownAuthority.equals(greatestAuthority)) {
+        if(!heardStrongerAuthority) {
             self.clearEdges();
             role = Role.root;
             parentId = -1;
@@ -70,16 +88,21 @@ public class DecentralizedComms extends CommunicationSystem {
             authorityList = new AuthorityList(self.getRobotId());
             incomingMessages.clear();
             return;
+        } else if(assignedEdge.isNull()) {
+            role = Role.unassignedChild;
+        } else {
+            role = Role.assignedChild;
         }
-        
-        role = (assignedEdge.isNull()) ? Role.unassignedChild : Role.assignedChild;
+
         parentId = greatestAuthority.getMostRecentAuthority();
         
+        //Add edges between self and parent assigned edge
         self.clearEdges();
         if(Role.assignedChild.equals(role)) {
             self.addEdge(new Edge(self.getRobotId(), parentId));
             self.addEdge(new Edge(parentId, self.getRobotId()));
         }
+
         //Make copy of authority list to avoid cycling
         AuthorityList myAuthority = new AuthorityList(greatestAuthority.getAuthorities());
         myAuthority.addAuthority(self.getRobotId());
@@ -139,7 +162,12 @@ public class DecentralizedComms extends CommunicationSystem {
             }
 
             if(parent == null) {
-                System.out.println("I " +self.getRobotId() + "lost connection to " + parentId);
+                //TEMP FIX TO STOP IN PLACE FOR MISSING CONNECTION
+                role = Role.root;
+                System.out.println("I " +self.getRobotId() + " lost connection to " + parentId);
+                assignment = new OrientedPoint[] {null, self.getPosition()};
+                return assignment;
+                
             }
 
             //Get transformation of parent that translates local coords to global positions
@@ -155,6 +183,25 @@ public class DecentralizedComms extends CommunicationSystem {
         return assignment;
     }
     
+    private OrientedPoint retrieveOwnAssignment() {
+        LatticeRobot parent = null;
+
+        for(LatticeRobot robot : commPeers) {
+            if(parentId.equals(robot.getRobotId())) {
+                parent = robot;
+            }
+        }
+
+        //Get transformation of parent that translates local coords to global positions
+        RigidBodyTransformation parentLocalToGlobal = new RigidBodyTransformation(parent.getPosition());
+
+        //Apply transformation of parent to assigned position to get global position of assigned target
+        OrientedPoint assignedLocationGlobal = parentLocalToGlobal.apply(assignedEdge.getToPos());
+        
+       return assignedLocationGlobal;
+    
+    }
+
     /**
      * Determines whether the robot is a root robot within the authority tree
      * @return status as a root
@@ -177,10 +224,10 @@ public class DecentralizedComms extends CommunicationSystem {
     public void syncPeers(ArrayList<LatticeRobot> neighbors) {
         if(neighbors == null || neighbors.isEmpty()) {
             this.commPeers = new ArrayList<>();
+            return;
         }
         this.commPeers = neighbors;
     }
-
     /**
      * Returns the current trust level of the robot.
      * @return the current trust level
@@ -241,10 +288,12 @@ public class DecentralizedComms extends CommunicationSystem {
         //Get global to local matrix for multiplication
         final RigidBodyTransformation GLOBAL_TO_LOCAL = new RigidBodyTransformation(self.getPosition()).inverse();
 
-        double[][] cost = new double[commPeers.size()][outgoingEdges.size()];
+                
 
         //If robot is a root, simply get commPeers and assign them edges
         if(isRoot()) {
+            double[][] cost = new double[commPeers.size()][outgoingEdges.size()];
+
             for(int i = 0; i < commPeers.size(); i++) {
                 for(int j = 0; j < outgoingEdges.size(); j++) {
                     //Get local position of neighboring robot
@@ -257,13 +306,22 @@ public class DecentralizedComms extends CommunicationSystem {
                     cost[i][j] = localPos.distance(destination);
                 }
             }
+
+            if(commPeers.size() != outgoingEdges.size()) {
+                cost = HungarianMatrixUtils.padToSquare(cost);
+            }
+    
+            return cost;
+
         } 
         //If robot is a child, ensure child obeys assignment by assigning parent to its prescribed edge
         else {
+            ArrayList<LatticeRobot> effectiveNeighbors = getEffectiveNeighbors();
+            double[][] cost = new double[effectiveNeighbors.size()][outgoingEdges.size()];
             // First pass: calculate all costs normally
-            for(int i = 0; i < commPeers.size(); i++) {
+            for(int i = 0; i < effectiveNeighbors.size(); i++) {
                 for(int j = 0; j < outgoingEdges.size(); j++) {
-                    OrientedPoint localPos = GLOBAL_TO_LOCAL.apply(commPeers.get(i).getPosition());
+                    OrientedPoint localPos = GLOBAL_TO_LOCAL.apply(effectiveNeighbors.get(i).getPosition());
                     OrientedPoint destination = outgoingEdges.get(j).getEdgeTransformation().apply(new OrientedPoint(0,0,0));
                     cost[i][j] = localPos.distance(destination);
                 }
@@ -271,15 +329,15 @@ public class DecentralizedComms extends CommunicationSystem {
 
             // Second pass: set parent row and inverse edge column to INFINITY,
             // except the intersection of parent row and inverse edge column
-            for(int i = 0; i < commPeers.size(); i++) {
-                if(commPeers.get(i).getRobotId() == parentId) {
+            for(int i = 0; i < effectiveNeighbors.size(); i++) {
+                if(effectiveNeighbors.get(i).getRobotId() == parentId) {
                     for(int j = 0; j < outgoingEdges.size(); j++) {
                         if(outgoingEdges.get(j).getEdgeTransformation().isInverse(assignedEdge.getEdgeTransformation())) {
                             // Set entire row and column to INFINITY except this intersection
                             for(int k = 0; k < outgoingEdges.size(); k++) {
                                 if(k != j) cost[i][k] = HungarianMatrixUtils.INFINITY;
                             }
-                            for(int k = 0; k < commPeers.size(); k++) {
+                            for(int k = 0; k < effectiveNeighbors.size(); k++) {
                                 if(k != i) cost[k][j] = HungarianMatrixUtils.INFINITY;
                             }
                             cost[i][j] = 0.0;
@@ -288,13 +346,27 @@ public class DecentralizedComms extends CommunicationSystem {
                     break;
                 }
             }
+
+            if(effectiveNeighbors.size() != outgoingEdges.size()) {
+                cost = HungarianMatrixUtils.padToSquare(cost);
+            }
+            return cost;
         }
 
-        if(commPeers.size() != outgoingEdges.size()) {
-           cost = HungarianMatrixUtils.padToSquare(cost);
-        }
-    
-        return cost;
+    }
 
+    private ArrayList<LatticeRobot> getEffectiveNeighbors() {
+        ArrayList<LatticeRobot> effectiveNeighbors = new ArrayList<>(); 
+        OrientedPoint assignedDestination = retrieveOwnAssignment();
+        for(LatticeRobot neighbor: commPeers) {
+            double sensingRangeWithRotationRestriction = LatticeRobot.COMM_RANGE - TimeStepDiffDrive.MAX_LINEAR_SPEED * 
+            Math.max(TimeStepDiffDrive.getTimeToRotateTo(self.getPosition(), assignedDestination), TimeStepDiffDrive.getTimeToRotateTo(neighbor.getPosition(), assignedDestination));
+
+            if(self.getPosition().distance(neighbor.getPosition()) < sensingRangeWithRotationRestriction) {
+                effectiveNeighbors.add(neighbor);
+            }
+        }
+
+        return effectiveNeighbors;
     }
 }

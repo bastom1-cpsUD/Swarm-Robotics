@@ -18,7 +18,7 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
     private MoveState moveState = MoveState.DONE;
     private double timeElapsed;
     
-    private static final double MAX_LINEAR_SPEED = 10.0;
+    public static final double MAX_LINEAR_SPEED = 10.0;
     private static final double WHEEL_RADIUS = 4;
     private static final double DISTANCE_BETWEEN_WHEELS = 30;
     private static final double MAX_ANGULAR_SPEED = MAX_LINEAR_SPEED / WHEEL_RADIUS;
@@ -31,6 +31,12 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
         this.leftAngularVel = 0.0;
         this.rightAngularVel = 0.0;
         TIME_TO_ESCAPE_CONGESTION = 2* LatticeRobot.COMM_RANGE / MAX_LINEAR_SPEED;
+    }
+
+    public static double getTimeToRotateTo(OrientedPoint currentPose, OrientedPoint newPose) {
+        double targetAngle = Math.atan2(newPose.y - currentPose.y, newPose.x - currentPose.x);
+        double rotateBy = normalizeAngle(targetAngle - currentPose.orientation);
+        return Math.abs(rotateBy) / MAX_ANGULAR_SPEED;
     }
 
     public boolean move(OrientedPoint pose, double dt) {
@@ -177,7 +183,7 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
         return false;
     }
     
-    private double normalizeAngle(double angle) {
+    private static double normalizeAngle(double angle) {
         while(angle > Math.PI) {
             angle -= 2 * Math.PI;
         }

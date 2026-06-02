@@ -10,11 +10,14 @@ public abstract class CommunicationSystem {
     protected Queue<Message> incomingMessages;
     protected Queue<Action> actionQueue;
 
-    public CommunicationSystem() {
-        incomingMessages = new LinkedList<>();
-        actionQueue = new LinkedList<>();
-    }
 
+    public CommunicationSystem() {
+        this(new LinkedList<>(), new LinkedList<>());
+    }
+    public CommunicationSystem(Queue<Message> incomingMessages, Queue<Action> actionQueue) {
+        this.incomingMessages = incomingMessages;
+        this.actionQueue = actionQueue;
+    }
     /**
      * Enqueues a message onto the communication system
      * @param msg

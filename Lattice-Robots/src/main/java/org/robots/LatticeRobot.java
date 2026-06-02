@@ -67,6 +67,10 @@ public class LatticeRobot extends Robot implements Communicatable {
         return Collections.unmodifiableSet(edges);
     }
 
+    public LatticeMotionModel getLatticeMotionModel() {
+        return latticeMotionModel;
+    }
+
     public TrustLevel getTrustLevel() {
         return commsSystem.getTrustLevel();
     }
@@ -111,8 +115,10 @@ public class LatticeRobot extends Robot implements Communicatable {
             //retrieve the intermediate point between target position and parent
             OrientedPoint newIntermediatePose = latticeMotionModel.getIntermediatePose(this.pose, parentPose, newAssignment, timeStep);
 
+            motionModel.startMoving();
+
             //Adopt intermediate position if it is a significant difference away from 
-            if(assignedPosition == null || newIntermediatePose.distance(assignedPosition) > latticeMotionModel.getAssignmentChangeThreshold()) {
+            if(assignedPosition == null || newIntermediatePose.distanceTo(assignedPosition) > TimeStepDiffDrive.ASSIGNMENT_CHANGE_THRESHOLD) {
                 assignedPosition = newIntermediatePose;
                 motionModel.startMoving();
             } else {

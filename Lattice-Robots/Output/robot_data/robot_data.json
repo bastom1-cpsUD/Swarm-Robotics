@@ -1,69 +1,16 @@
 {
-  "robots" : [ {
-    "id" : 1,
-    "x" : 220.0,
-    "y" : 240.0,
-    "orientation" : 0.45
-  }, {
-    "id" : 2,
-    "x" : 310.0,
-    "y" : 210.0,
-    "orientation" : 1.82
-  }, {
-    "id" : 3,
-    "x" : 390.0,
-    "y" : 280.0,
-    "orientation" : 3.14
-  }, {
-    "id" : 4,
-    "x" : 280.0,
-    "y" : 360.0,
-    "orientation" : 5.27
-  }, {
-    "id" : 6,
-    "x" : 520.0,
-    "y" : 250.0,
-    "orientation" : 0.91
-  }, {
-    "id" : 7,
-    "x" : 410.0,
-    "y" : 450.0,
-    "orientation" : 4.58
-  }, {
-    "id" : 8,
-    "x" : 572.2205382885088,
-    "y" : 380.48962781810604,
-    "orientation" : 2.36
-  }, {
-    "id" : 5,
-    "x" : 537.0,
-    "y" : 345.0,
-    "orientation" : 2.36
-  } ],
-  "edges" : [ ],
-  "trust_levels" : [ {
-    "id" : 1,
-    "trustLevel" : "Friendly"
-  }, {
-    "id" : 2,
-    "trustLevel" : "Friendly"
-  }, {
-    "id" : 3,
-    "trustLevel" : "Friendly"
-  }, {
-    "id" : 4,
-    "trustLevel" : "Friendly"
-  }, {
-    "id" : 6,
-    "trustLevel" : "Friendly"
-  }, {
-    "id" : 7,
-    "trustLevel" : "Friendly"
-  }, {
-    "id" : 8,
-    "trustLevel" : "Friendly"
-  }, {
-    "id" : 5,
-    "trustLevel" : "Friendly"
-  } ]
+  "robots": [
+    { "id": 1, "x": 390, "y": 390, "orientation": 0.10 },
+    { "id": 2, "x": 430, "y": 380, "orientation": 0.25 },
+    { "id": 3, "x": 470, "y": 395, "orientation": 0.40 },
+    { "id": 4, "x": 510, "y": 385, "orientation": 0.55 }
+  
+  ],
+  "edges": [],
+  "trust_levels": [
+    { "id": 1, "trustLevel": "Friendly" },
+    { "id": 2, "trustLevel": "Friendly" },
+    { "id": 3, "trustLevel": "Friendly" },
+    { "id": 4, "trustLevel": "Friendly" }
+  ]
 }
