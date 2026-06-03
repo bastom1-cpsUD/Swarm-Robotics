@@ -115,12 +115,10 @@ public class LatticeRobot extends Robot implements Communicatable, Comparable<La
             //retrieve the intermediate point between target position and parent
             OrientedPoint newIntermediatePose = latticeMotionModel.getIntermediatePose(this.pose, parentPose, newAssignment, timeStep);
 
-            //Adopt intermediate position if it is a significant difference away from 
-            if(assignedPosition == null || newIntermediatePose.distanceTo(assignedPosition) > TimeStepDiffDrive.ASSIGNMENT_CHANGE_THRESHOLD) {
+            //Adopt intermediate position if it is a significant difference away from
+            if(!pose.equals(newIntermediatePose)) { 
                 assignedPosition = newIntermediatePose;
                 motionModel.startMoving();
-            } else {
-                assignedPosition = newIntermediatePose; // update quietly without resetting motion
             }
             commsSystem.resetCommunicationState();
         }     

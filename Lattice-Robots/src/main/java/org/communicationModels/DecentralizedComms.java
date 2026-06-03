@@ -186,7 +186,7 @@ public class DecentralizedComms extends CommunicationSystem {
 
             double localTheta = Math.atan2(dyOrientation, dxOrientation);
 
-            double globalOrientation = parent.getPosition().getOrientation() + localTheta;
+            double globalOrientation = TimeStepDiffDrive.normalizeAngle(parent.getPosition().getOrientation() + localTheta);
 
             //Do we need to convert to local if this is just for positioning???
             assignment = new OrientedPoint[] {parent.getPosition(), new OrientedPoint(assignedLocationGlobal.x, assignedLocationGlobal.y, globalOrientation)};
@@ -219,6 +219,7 @@ public class DecentralizedComms extends CommunicationSystem {
             return;
         }
         this.commPeers = neighbors;
+        
     }
     /**
      * Returns the current trust level of the robot.

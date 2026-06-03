@@ -85,7 +85,7 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
 
         double angle = Math.atan2(target.y - y, target.x - x);
 
-        return new OrientedPoint(x,y,angle);
+        return new OrientedPoint(x,y, angle);
 
     }
 
@@ -97,20 +97,20 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
                 if(rotateTo(currentPose, newPose, dt)) {
                     moveState = MoveState.TRANSLATE;
                 }
-                break;
+            break;
 
             case TRANSLATE:
                 if(translateTo(currentPose, newPose, dt)) {
                     moveState = MoveState.ROTATE_TO_FINAL;
                 }
-                break;
+            break;
 
             case ROTATE_TO_FINAL:
                 if(rotateTo(currentPose, newPose.orientation, dt)) {
                     moveState = MoveState.DONE;
                     return true;
                 }
-                break;
+            break;
 
             case DONE:
                 return true;
@@ -183,7 +183,7 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
         return false;
     }
     
-    private static double normalizeAngle(double angle) {
+    public static double normalizeAngle(double angle) {
         while(angle > Math.PI) {
             angle -= 2 * Math.PI;
         }
@@ -201,7 +201,7 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
     }
 
     private boolean isZero(double value) {
-        return Math.abs(value) < 1e-9;
+        return Math.abs(value) < 1e-3;
     }
 
     public double getAssignmentChangeThreshold() {
