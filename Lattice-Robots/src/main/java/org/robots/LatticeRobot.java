@@ -16,7 +16,7 @@ import org.motionModels.LatticeMotionModel;
 import org.motionModels.TimeStepDiffDrive;
 import org.simulation.Edge;
 
-public class LatticeRobot extends Robot implements Communicatable {
+public class LatticeRobot extends Robot implements Communicatable, Comparable<LatticeRobot>{
 
     //Local knowledge & edges
     private DecentralizedComms commsSystem;
@@ -140,5 +140,15 @@ public class LatticeRobot extends Robot implements Communicatable {
         }
         latticeMotionModel.moveTo(pose, assignedPosition, dt);
         
+    }
+
+    public int compareTo(LatticeRobot robot) {
+        if(this.robotId < robot.getRobotId()) {
+            return -1;
+        } else if (this.robotId > robot.getRobotId()) {
+            return 1;
+        } else {
+            return 0;
+        }
     }
 }

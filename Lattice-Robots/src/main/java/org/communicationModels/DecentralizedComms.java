@@ -174,14 +174,24 @@ public class DecentralizedComms extends CommunicationSystem {
             //Get transformation of parent that translates local coords to global positions
             RigidBodyTransformation parentLocalToGlobal = new RigidBodyTransformation(parent.getPosition());
 
-            //Apply transformation of parent to assigned position to get global position of assigned target
+             //Apply transformation of parent to assigned position to get global position of assigned target
             OrientedPoint assignedLocationGlobal = parentLocalToGlobal.apply(assignedEdge.getToPos());
-        
-            //Do we need to convert to local if this is just for positioning???
-            assignment = new OrientedPoint[] {parent.getPosition(), assignedLocationGlobal};
-        }
 
-        return assignment;
+            RigidBodyTransformation edgeTransform = assignedEdge.getEdgeTransformation();
+            OrientedPoint xAxisInParent = edgeTransform.apply(new OrientedPoint(1, 0 ,0));
+            OrientedPoint destinationInParent = edgeTransform.apply(new OrientedPoint(0,0,0));
+        
+            double dxOrientation = xAxisInParent.x - destinationInParent.x;
+            double dyOrientation = xAxisInParent.y - destinationInParent.y;
+
+            double localTheta = Math.atan2(dyOrientation, dxOrientation);
+
+            double globalOrientation = parent.getPosition().getOrientation() + localTheta;
+
+            //Do we need to convert to local if this is just for positioning???
+            assignment = new OrientedPoint[] {parent.getPosition(), new OrientedPoint(assignedLocationGlobal.x, assignedLocationGlobal.y, globalOrientation)};
+        }
+        return assignment; 
     }
 
     /**
