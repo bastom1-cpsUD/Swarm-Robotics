@@ -22,11 +22,6 @@ public interface Movable {
     public boolean moveTo(OrientedPoint target, double dt);
 
     /**
-     * Initiates the robot's movement by triggering the starting mechanism for the motion model of the robot
-     */
-    public void startMoving();
-
-    /**
      * Provides the distance traveled by the robot according to its motion model
      * @return the distance traveled by the robot
      */

@@ -60,7 +60,7 @@ public class RobotPanel extends JPanel {
                     dragging = true;
 
                     //FOR TESTING ONLY
-                    System.out.println(hitRobot.getRobotId());
+                    hitRobot.dataDump();
 
                     offsetX = e.getX() - hitRobot.getPosition().x;
                     offsetY = e.getY() - hitRobot.getPosition().y;

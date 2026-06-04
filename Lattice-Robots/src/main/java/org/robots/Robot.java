@@ -40,11 +40,6 @@ public class Robot implements Movable, Drawable {
 
     /** {@inheritDoc} */
     @Override
-    public void startMoving() {
-        motionModel.startMoving();
-    }
-    /** {@inheritDoc} */
-    @Override
     public boolean moveTo(OrientedPoint target, double dt) {
         return motionModel.moveTo(pose, target, dt);
     }

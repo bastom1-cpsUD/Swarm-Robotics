@@ -96,6 +96,7 @@ public class LatticeRobot extends Robot implements Communicatable, Comparable<La
         if(!inCongestedArea) {
             processMessages();
             commsSystem.broadcastAssignment();
+
             //Retrieve assignment from previous time step
             OrientedPoint[] assignment = commsSystem.retrieveAssignmentLocation();
             OrientedPoint parentPose = assignment[0];
@@ -109,6 +110,7 @@ public class LatticeRobot extends Robot implements Communicatable, Comparable<La
             //If you are unassigned, begin run away procedure
             if(!commsSystem.isAssigned()) {
                 inCongestedArea = true;
+                commsSystem.resetCommunicationState();
                 return;
             }
 
@@ -118,7 +120,6 @@ public class LatticeRobot extends Robot implements Communicatable, Comparable<La
             //Adopt intermediate position if it is a significant difference away from
             if(!pose.equals(newIntermediatePose)) { 
                 assignedPosition = newIntermediatePose;
-                motionModel.startMoving();
             }
             commsSystem.resetCommunicationState();
         }     
@@ -132,7 +133,6 @@ public class LatticeRobot extends Robot implements Communicatable, Comparable<La
             if(completedRepositionMovement) {
                 inCongestedArea = false;
                 assignedPosition = this.pose;
-                commsSystem.resetCommunicationState();
             }
             return;
         }
@@ -148,5 +148,12 @@ public class LatticeRobot extends Robot implements Communicatable, Comparable<La
         } else {
             return 0;
         }
+    }
+
+    public void dataDump() {
+        System.out.println("ID: " + robotId + 
+        "\nRole: " + (commsSystem.isRoot() ? "Root" : (commsSystem.isAssigned() ? "AssignedChild" : "Orphan")) +
+        "\nPose = " + pose +
+        "\nAssignment: " + assignedPosition);
     }
 }

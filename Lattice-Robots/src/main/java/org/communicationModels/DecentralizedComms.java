@@ -1,8 +1,11 @@
 package org.communicationModels;
 
-import java.sql.Time;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.PriorityQueue;
 
 import org.graphs.LatticeGraph;
@@ -33,7 +36,8 @@ public class DecentralizedComms extends CommunicationSystem {
     protected LatticeRobot self;
     protected Integer parentId;
     protected TrustLevel trustLevel;
-    protected ArrayList<LatticeRobot> commPeers;
+    protected Map<Integer, LatticeRobot> commPeers;
+    protected Map<Integer, Observation> observations;
     protected LatticeEdge assignedEdge;
     protected AuthorityList authorityList;
     protected static final LatticeGraph LATTICE_GRAPH = new SquareLattice();
@@ -42,7 +46,8 @@ public class DecentralizedComms extends CommunicationSystem {
         super(new PriorityQueue<>(), new LinkedList<>());
         this.self = self;
         this.parentId = -1;
-        this.commPeers = new ArrayList<LatticeRobot>();
+        this.commPeers = new HashMap<>();
+        this.observations = new HashMap<>();
         assignedEdge = new LatticeEdge();
         authorityList = new AuthorityList(self.getRobotId());
         trustLevel = TrustLevel.Friendly;
@@ -126,14 +131,18 @@ public class DecentralizedComms extends CommunicationSystem {
         //Get outgoing edges of vertex
         ArrayList<LatticeEdge> outgoingEdges = LATTICE_GRAPH.getOutgoingEdges(myVertex);
 
-        for(int i = 0; i < assignments.length; i++) {
-           Integer robot = assignments[i][0] >= commPeers.size() ? null : assignments[i][0];
-           Integer edge = assignments[i][1] >= outgoingEdges.size() ? null : assignments[i][1];
+        //Get robotIds
+        List<Integer> robotIds = new ArrayList<>(observations.keySet());
+        Collections.sort(robotIds);
 
-           if(robot != null) {
+        for(int i = 0; i < assignments.length; i++) {
+           Integer robotId = assignments[i][0] >= robotIds.size() ? null : assignments[i][0];
+           Integer edgeIndex = assignments[i][1] >= outgoingEdges.size() ? null : assignments[i][1];
+
+           if(robotId != null) {
                 AuthorityList msgAuthority = new AuthorityList(this.authorityList.getAuthorities());
-                Message msg = new Message(msgAuthority, (edge == null) ? new LatticeEdge() : outgoingEdges.get(edge));
-                commPeers.get(robot).enqueueMessage(msg);
+                Message msg = new Message(msgAuthority, (edgeIndex == null) ? new LatticeEdge() : outgoingEdges.get(edgeIndex));
+                commPeers.get(robotIds.get(robotId)).enqueueMessage(msg);
 
                 //System.out.println("Assigning robot (" +  robot + ") " + commPeers.get(robot).getRobotId() + " to " + ((edge == null) ? new LatticeEdge() : outgoingEdges.get(edge)));
            }
@@ -154,13 +163,7 @@ public class DecentralizedComms extends CommunicationSystem {
             
         } else {
 
-            LatticeRobot parent = null;
-
-            for(LatticeRobot robot : commPeers) {
-                if(parentId.equals(robot.getRobotId())) {
-                    parent = robot;
-                }
-            }
+            LatticeRobot parent = commPeers.get(parentId);
 
             if(parent == null) {
                 //TEMP FIX TO STOP IN PLACE FOR MISSING CONNECTION
@@ -215,10 +218,19 @@ public class DecentralizedComms extends CommunicationSystem {
      */
     public void syncPeers(ArrayList<LatticeRobot> neighbors) {
         if(neighbors == null || neighbors.isEmpty()) {
-            this.commPeers = new ArrayList<>();
+            this.commPeers = new HashMap<>();
+            this.observations = new HashMap<>();
             return;
         }
-        this.commPeers = neighbors;
+
+        RigidBodyTransformation globalToLocal = new RigidBodyTransformation(self.getPosition()).inverse();
+
+        for(LatticeRobot neighbor : neighbors) {
+            Observation obs = new Observation(neighbor, globalToLocal);
+            observations.put(neighbor.getRobotId(), obs);
+
+            commPeers.put(neighbor.getRobotId(), neighbor);
+        }
         
     }
     /**
@@ -243,7 +255,8 @@ public class DecentralizedComms extends CommunicationSystem {
     public void resetCommunicationState() {
         this.role = null;
         parentId = -1;
-        commPeers = new ArrayList<>();
+        commPeers = new HashMap<>();
+        observations = new HashMap<>();
         assignedEdge = new LatticeEdge();
         authorityList = new AuthorityList();
         incomingMessages.clear();
@@ -278,17 +291,18 @@ public class DecentralizedComms extends CommunicationSystem {
         ArrayList<LatticeEdge> outgoingEdges = LATTICE_GRAPH.getOutgoingEdges(myVertex);
         if(outgoingEdges.isEmpty()) System.out.println("I DONT HAVE ANY OUTGOING EDGES");
 
-        //Get global to local matrix for multiplication
-        final RigidBodyTransformation GLOBAL_TO_LOCAL = new RigidBodyTransformation(self.getPosition()).inverse();
+        //Sorts Ids in order for determinism
+        List<Integer> robotIds = new ArrayList<>(observations.keySet());
+        Collections.sort(robotIds);
 
-        double[][] cost = new double[commPeers.size()][outgoingEdges.size()];
+        double[][] cost = new double[robotIds.size()][outgoingEdges.size()];
 
         //If robot is a root, simply get commPeers and assign them edges
         if(isRoot()) {
-            for(int i = 0; i < commPeers.size(); i++) {
+            for(int i = 0; i < robotIds.size(); i++) {
                 for(int j = 0; j < outgoingEdges.size(); j++) {
                     //Get local position of neighboring robot
-                    OrientedPoint localPos = GLOBAL_TO_LOCAL.apply(commPeers.get(i).getPosition());
+                    OrientedPoint localPos = observations.get(robotIds.get(i)).getLocalPosition();
 
                     //Get destination of the edge in local coordinates
                     OrientedPoint destination = outgoingEdges.get(j).getEdgeTransformation().apply(new OrientedPoint(0,0,0));
@@ -303,9 +317,9 @@ public class DecentralizedComms extends CommunicationSystem {
         //If robot is a child, ensure child obeys assignment by assigning parent to its prescribed edge
         else {
             // First pass: calculate all costs normally
-            for(int i = 0; i < commPeers.size(); i++) {
+            for(int i = 0; i < robotIds.size(); i++) {
                 for(int j = 0; j < outgoingEdges.size(); j++) {
-                    OrientedPoint localPos = GLOBAL_TO_LOCAL.apply(commPeers.get(i).getPosition());
+                    OrientedPoint localPos = observations.get(robotIds.get(i)).getLocalPosition();
                     OrientedPoint destination = outgoingEdges.get(j).getEdgeTransformation().apply(new OrientedPoint(0,0,0));
                     cost[i][j] = localPos.distance(destination);
                 }
@@ -313,15 +327,15 @@ public class DecentralizedComms extends CommunicationSystem {
 
             // Second pass: set parent row and inverse edge column to INFINITY,
             // except the intersection of parent row and inverse edge column
-            for(int i = 0; i < commPeers.size(); i++) {
-                if(commPeers.get(i).getRobotId() == parentId) {
+            for(int i = 0; i < robotIds.size(); i++) {
+                if(robotIds.get(i) == parentId) {
                     for(int j = 0; j < outgoingEdges.size(); j++) {
                         if(outgoingEdges.get(j).getEdgeTransformation().isInverse(assignedEdge.getEdgeTransformation())) {
                             // Set entire row and column to INFINITY except this intersection
                             for(int k = 0; k < outgoingEdges.size(); k++) {
                                 if(k != j) cost[i][k] = HungarianMatrixUtils.INFINITY;
                             }
-                            for(int k = 0; k < commPeers.size(); k++) {
+                            for(int k = 0; k < robotIds.size(); k++) {
                                 if(k != i) cost[k][j] = HungarianMatrixUtils.INFINITY;
                             }
                             cost[i][j] = 0.0;
@@ -332,7 +346,7 @@ public class DecentralizedComms extends CommunicationSystem {
             }
         }
 
-        if(commPeers.size() != outgoingEdges.size()) {
+        if(robotIds.size() != outgoingEdges.size()) {
            cost = HungarianMatrixUtils.padToSquare(cost);
         }
 
