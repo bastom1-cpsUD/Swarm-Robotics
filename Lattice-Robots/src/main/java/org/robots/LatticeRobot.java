@@ -20,7 +20,7 @@ public class LatticeRobot extends Robot implements Communicatable, Comparable<La
 
     //Local knowledge & edges
     private DecentralizedComms commsSystem;
-    private Set<Edge> edges;
+    private ArrayList<Edge> edges;
     private ArrayList<LatticeRobot> neighbors;
 
     private final LatticeMotionModel latticeMotionModel;
@@ -32,7 +32,7 @@ public class LatticeRobot extends Robot implements Communicatable, Comparable<La
         super(id, pose, new TimeStepDiffDrive(), new TriangularModel());
         this.latticeMotionModel = (LatticeMotionModel) motionModel;
         this.commsSystem = new DecentralizedComms(id, this);
-        this.edges = new HashSet<>();
+        this.edges = new ArrayList<>();
         this.neighbors = new ArrayList<>();
         this.inCongestedArea = false;
     }
@@ -63,8 +63,8 @@ public class LatticeRobot extends Robot implements Communicatable, Comparable<La
         this.neighbors.clear();
     }
 
-    public Set<Edge> getEdges() {
-        return Collections.unmodifiableSet(edges);
+    public ArrayList<Edge> getEdges() {
+        return edges;
     }
 
     public LatticeMotionModel getLatticeMotionModel() {
@@ -84,6 +84,7 @@ public class LatticeRobot extends Robot implements Communicatable, Comparable<La
     /** {@inheritDoc} */
     @Override
     public void processMessages() {
+        clearEdges();
         commsSystem.syncPeers(neighbors);
         commsSystem.processMessages();
     }
@@ -94,6 +95,7 @@ public class LatticeRobot extends Robot implements Communicatable, Comparable<La
      */
     public void executeTimeStep(double timeStep) {
         if(!inCongestedArea) {
+            commsSystem.resetCommunicationState();
             processMessages();
             commsSystem.broadcastAssignment();
 
@@ -110,6 +112,7 @@ public class LatticeRobot extends Robot implements Communicatable, Comparable<La
             //If you are unassigned, begin run away procedure
             if(!commsSystem.isAssigned()) {
                 inCongestedArea = true;
+                clearEdges();
                 commsSystem.resetCommunicationState();
                 return;
             }
@@ -121,7 +124,6 @@ public class LatticeRobot extends Robot implements Communicatable, Comparable<La
             if(!pose.equals(newIntermediatePose)) { 
                 assignedPosition = newIntermediatePose;
             }
-            commsSystem.resetCommunicationState();
         }     
     }
     
@@ -152,8 +154,9 @@ public class LatticeRobot extends Robot implements Communicatable, Comparable<La
 
     public void dataDump() {
         System.out.println("ID: " + robotId + 
-        "\nRole: " + (commsSystem.isRoot() ? "Root" : (commsSystem.isAssigned() ? "AssignedChild" : "Orphan")) +
+        "\nRole: " + (commsSystem.isRoot() ? "Root" : (commsSystem.isAssigned() ? "Assigned Child" : "Orphan")) +
         "\nPose = " + pose +
-        "\nAssignment: " + assignedPosition);
+        "\nAssignment: " + assignedPosition + 
+        "\nParent: " + commsSystem.parentId);
     }
 }

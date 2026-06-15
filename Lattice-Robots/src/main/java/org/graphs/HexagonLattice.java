@@ -17,7 +17,7 @@ public class HexagonLattice extends LatticeGraph {
 
         LatticeEdge e1 = new LatticeEdge(v0, v1, new OrientedPoint(EDGE_LENGTH * Math.cos(Math.toRadians(60)), EDGE_LENGTH * Math.sin(Math.toRadians(60)), 0)); // UP-RIGHT
         LatticeEdge e2 = new LatticeEdge(v0, v1, new OrientedPoint(-EDGE_LENGTH, 0, 0)); // Left
-        LatticeEdge e3 = new LatticeEdge(v0, v1, new OrientedPoint(EDGE_LENGTH * Math.cos(Math.toRadians(60)), -EDGE_LENGTH *EDGE_LENGTH * Math.sin(Math.toRadians(60)), 0)); // DOWN-RIGHT
+        LatticeEdge e3 = new LatticeEdge(v0, v1, new OrientedPoint(EDGE_LENGTH * Math.cos(Math.toRadians(60)), -EDGE_LENGTH * Math.sin(Math.toRadians(60)), 0)); // DOWN-RIGHT
     
         v0edges.add(e1);
         v0edges.add(e2);

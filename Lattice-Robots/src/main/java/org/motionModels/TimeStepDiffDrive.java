@@ -40,7 +40,7 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
     }
 
     public boolean move(OrientedPoint pose, double dt) {
-        if(Double.compare(timeElapsed, TIME_TO_ESCAPE_CONGESTION) > 0) {
+        if(Double.compare(timeElapsed, TIME_TO_ESCAPE_CONGESTION) >= 0) {
             moveState = MoveState.DONE;
             timeElapsed = 0.0;
             changeState(0, 0);
@@ -95,7 +95,8 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
 
     public boolean moveTo(OrientedPoint currentPose, OrientedPoint newPose, double dt) {
         moveState = checkNextMoveState(currentPose, newPose);
-        
+ 
+
         switch(moveState) {
 
             case ROTATE_TO_POINT:
@@ -198,7 +199,7 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
             angle -= 2 * Math.PI;
         }
 
-        while(angle < -Math.PI) {
+        while(angle <= -Math.PI) {
             angle += 2 * Math.PI;
         }
 

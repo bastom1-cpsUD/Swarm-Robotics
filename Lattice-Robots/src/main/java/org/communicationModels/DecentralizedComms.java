@@ -34,7 +34,7 @@ public class DecentralizedComms extends CommunicationSystem {
 
     protected Role role;
     protected LatticeRobot self;
-    protected Integer parentId;
+    public Integer parentId;
     protected TrustLevel trustLevel;
     protected Map<Integer, LatticeRobot> commPeers;
     protected Map<Integer, Observation> observations;
@@ -84,37 +84,39 @@ public class DecentralizedComms extends CommunicationSystem {
             break;
         }
 
-
         //Step 4: Adopt greatest authority or retain own authority
         if(!heardStrongerAuthority) {
-            self.clearEdges();
+            
             role = Role.root;
             parentId = -1;
             assignedEdge = new LatticeEdge();
             authorityList = new AuthorityList(self.getRobotId());
-            incomingMessages.clear();
+            
             return;
         } else if(assignedEdge.isNull()) {
             role = Role.unassignedChild;
+            return;
+            
         } else {
             role = Role.assignedChild;
-        }
-
-        parentId = greatestAuthority.getMostRecentAuthority();
+            parentId = greatestAuthority.getMostRecentAuthority();
+            
+            //Add edges between self and parent assigned edge
         
-        //Add edges between self and parent assigned edge
-        self.clearEdges();
-        if(Role.assignedChild.equals(role)) {
-            self.addEdge(new Edge(self.getRobotId(), parentId));
-            self.addEdge(new Edge(parentId, self.getRobotId()));
-        }
+            if(Role.assignedChild.equals(role)) {
+                self.addEdge(new Edge(self.getRobotId(), parentId));
+                self.addEdge(new Edge(parentId, self.getRobotId()));
+            }
 
-        //Make copy of authority list to avoid cycling
-        AuthorityList myAuthority = new AuthorityList(greatestAuthority.getAuthorities());
-        myAuthority.addAuthority(self.getRobotId());
-        authorityList = myAuthority;
+            //Make copy of authority list to avoid cycling
+            AuthorityList myAuthority = new AuthorityList(greatestAuthority.getAuthorities());
+            myAuthority.addAuthority(self.getRobotId());
+            authorityList = myAuthority;
+        }
         incomingMessages.clear();
     }
+
+        
 
     /**
      * Broadcasts all assignments determined by the robot's current role and authority during the time step.
@@ -184,8 +186,9 @@ public class DecentralizedComms extends CommunicationSystem {
             OrientedPoint xAxisInParent = edgeTransform.apply(new OrientedPoint(1, 0 ,0));
             OrientedPoint destinationInParent = edgeTransform.apply(new OrientedPoint(0,0,0));
         
-            double dxOrientation = xAxisInParent.x - destinationInParent.x;
-            double dyOrientation = xAxisInParent.y - destinationInParent.y;
+            //POSSIBLY NORMALIZE THESE ANGLES THEN PASS TO ATAN2
+            double dxOrientation = TimeStepDiffDrive.normalizeAngle(xAxisInParent.x - destinationInParent.x);
+            double dyOrientation = TimeStepDiffDrive.normalizeAngle(xAxisInParent.y - destinationInParent.y);
 
             double localTheta = Math.atan2(dyOrientation, dxOrientation);
 
@@ -217,9 +220,10 @@ public class DecentralizedComms extends CommunicationSystem {
      * @param neighbors
      */
     public void syncPeers(ArrayList<LatticeRobot> neighbors) {
-        if(neighbors == null || neighbors.isEmpty()) {
-            this.commPeers = new HashMap<>();
-            this.observations = new HashMap<>();
+        this.commPeers = new HashMap<>();
+        this.observations = new HashMap<>();
+    
+        if (neighbors == null || neighbors.isEmpty()) {
             return;
         }
 
@@ -259,7 +263,6 @@ public class DecentralizedComms extends CommunicationSystem {
         observations = new HashMap<>();
         assignedEdge = new LatticeEdge();
         authorityList = new AuthorityList();
-        incomingMessages.clear();
     }
 
     private int[][] assignVertices() {
