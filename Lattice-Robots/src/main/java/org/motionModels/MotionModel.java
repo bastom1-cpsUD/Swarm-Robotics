@@ -23,9 +23,6 @@ public abstract class MotionModel {
      *  @return true if the robot has completed its movement, false otherwise
     */
     public abstract boolean move(OrientedPoint currentPose, double dt);
-    
-    /**Initiates the motion models moving functionality */
-    public abstract void startMoving();
 
     public double getDistanceTraveled() {
         return distTraveled;

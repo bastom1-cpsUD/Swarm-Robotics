@@ -97,4 +97,11 @@ public class Edge {
         edge.lineTo(pTo.getX(), pTo.getY());
         g2d.draw(edge);
     }
+
+    @Override
+    public String toString() {
+        return "Edge connects robot " + fromId + " to robot " + toId;
+    }
 }
+
+

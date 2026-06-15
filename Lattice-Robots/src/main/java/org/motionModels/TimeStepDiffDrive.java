@@ -18,7 +18,7 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
     private MoveState moveState = MoveState.DONE;
     private double timeElapsed;
     
-    private static final double MAX_LINEAR_SPEED = 10.0;
+    public static final double MAX_LINEAR_SPEED = 10.0;
     private static final double WHEEL_RADIUS = 4;
     private static final double DISTANCE_BETWEEN_WHEELS = 30;
     private static final double MAX_ANGULAR_SPEED = MAX_LINEAR_SPEED / WHEEL_RADIUS;
@@ -33,12 +33,22 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
         TIME_TO_ESCAPE_CONGESTION = 2* LatticeRobot.COMM_RANGE / MAX_LINEAR_SPEED;
     }
 
+    public static double getTimeToRotateTo(OrientedPoint currentPose, OrientedPoint newPose) {
+        double targetAngle = Math.atan2(newPose.y - currentPose.y, newPose.x - currentPose.x);
+        double rotateBy = normalizeAngle(targetAngle - currentPose.orientation);
+        return Math.abs(rotateBy) / MAX_ANGULAR_SPEED;
+    }
+
     public boolean move(OrientedPoint pose, double dt) {
-        if(Double.compare(timeElapsed, TIME_TO_ESCAPE_CONGESTION) > 0) {
+        if(Double.compare(timeElapsed, TIME_TO_ESCAPE_CONGESTION) >= 0) {
+            moveState = MoveState.DONE;
             timeElapsed = 0.0;
             changeState(0, 0);
             return true;
         }
+
+        moveState = MoveState.TRANSLATE;
+
         changeState(MAX_ANGULAR_SPEED, MAX_ANGULAR_SPEED);
 
         pose.x = pose.x + (WHEEL_RADIUS / 2) * (leftAngularVel + rightAngularVel) * Math.cos(pose.orientation) * dt;
@@ -79,32 +89,27 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
 
         double angle = Math.atan2(target.y - y, target.x - x);
 
-        return new OrientedPoint(x,y,angle);
+        return new OrientedPoint(x,y, angle);
 
     }
 
     public boolean moveTo(OrientedPoint currentPose, OrientedPoint newPose, double dt) {
-        
+        moveState = checkNextMoveState(currentPose, newPose);
+ 
+
         switch(moveState) {
 
             case ROTATE_TO_POINT:
-                if(rotateTo(currentPose, newPose, dt)) {
-                    moveState = MoveState.TRANSLATE;
-                }
-                break;
+                rotateTo(currentPose, newPose, dt);
+            break;
 
             case TRANSLATE:
-                if(translateTo(currentPose, newPose, dt)) {
-                    moveState = MoveState.ROTATE_TO_FINAL;
-                }
-                break;
+                translateTo(currentPose, newPose, dt);
+            break;
 
             case ROTATE_TO_FINAL:
-                if(rotateTo(currentPose, newPose.orientation, dt)) {
-                    moveState = MoveState.DONE;
-                    return true;
-                }
-                break;
+                rotateTo(currentPose, newPose.orientation, dt);
+            break;
 
             case DONE:
                 return true;
@@ -113,8 +118,20 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
         return false;
     }
 
-    public void startMoving() {
-        moveState = MoveState.ROTATE_TO_POINT;
+    public static MoveState checkNextMoveState(OrientedPoint currentPose, OrientedPoint newPose) {
+        
+        if(!isZero(currentPose.distance(newPose))) {
+            double targetHeading = Math.atan2(newPose.y - currentPose.y, newPose.x - currentPose.x);
+            if(!isZero(normalizeAngle(targetHeading - currentPose.orientation))) {
+                return MoveState.ROTATE_TO_POINT;
+            }
+            return MoveState.TRANSLATE;
+        } else {
+            if(!isZero(normalizeAngle(newPose.orientation - currentPose.orientation))) {
+                return MoveState.ROTATE_TO_FINAL;
+            }
+            return MoveState.DONE;
+        }
     }
 
     private boolean rotateTo(OrientedPoint pose, OrientedPoint newPose, double dt) {
@@ -177,12 +194,12 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
         return false;
     }
     
-    private double normalizeAngle(double angle) {
+    public static double normalizeAngle(double angle) {
         while(angle > Math.PI) {
             angle -= 2 * Math.PI;
         }
 
-        while(angle < -Math.PI) {
+        while(angle <= -Math.PI) {
             angle += 2 * Math.PI;
         }
 
@@ -194,8 +211,8 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
         this.rightAngularVel = rightAngVel;
     }
 
-    private boolean isZero(double value) {
-        return Math.abs(value) < 1e-9;
+    private static boolean isZero(double value) {
+        return Math.abs(value) < 1e-3;
     }
 
     public double getAssignmentChangeThreshold() {

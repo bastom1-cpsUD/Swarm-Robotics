@@ -16,11 +16,11 @@ import org.motionModels.LatticeMotionModel;
 import org.motionModels.TimeStepDiffDrive;
 import org.simulation.Edge;
 
-public class LatticeRobot extends Robot implements Communicatable {
+public class LatticeRobot extends Robot implements Communicatable, Comparable<LatticeRobot>{
 
     //Local knowledge & edges
     private DecentralizedComms commsSystem;
-    private Set<Edge> edges;
+    private ArrayList<Edge> edges;
     private ArrayList<LatticeRobot> neighbors;
 
     private final LatticeMotionModel latticeMotionModel;
@@ -32,7 +32,7 @@ public class LatticeRobot extends Robot implements Communicatable {
         super(id, pose, new TimeStepDiffDrive(), new TriangularModel());
         this.latticeMotionModel = (LatticeMotionModel) motionModel;
         this.commsSystem = new DecentralizedComms(id, this);
-        this.edges = new HashSet<>();
+        this.edges = new ArrayList<>();
         this.neighbors = new ArrayList<>();
         this.inCongestedArea = false;
     }
@@ -42,26 +42,33 @@ public class LatticeRobot extends Robot implements Communicatable {
     }
 
     public void addNeighbor(LatticeRobot other) {
-        //Check if edge already exists to prevent duplicates
-        boolean edgeExists = this.edges.stream().anyMatch(edge -> edge.getToId() == other.getRobotId());
+        this.neighbors.add(other);
 
-        if(!edgeExists) {
-            this.edges.add(new Edge(this.getRobotId(), other.getRobotId()));
-            other.edges.add(new Edge(other.getRobotId(), this.getRobotId()));
-            this.neighbors.add(other);
-            other.neighbors.add(this);
-        }
     }
 
     public void removeNeighbor(LatticeRobot neighbor) {
-        neighbor.edges.removeIf(edge -> edge.getToId() == this.getRobotId());
-        this.edges.removeIf(edge -> edge.getToId() == neighbor.getRobotId());
         this.neighbors.remove(neighbor);
-        neighbor.neighbors.remove(this);
+
     }
 
-    public Set<Edge> getEdges() {
-        return Collections.unmodifiableSet(edges);
+    public void addEdge(Edge edge) {
+        this.edges.add(edge);
+    }
+
+    public void clearEdges() {
+        this.edges.clear();
+    }
+
+    public void clearNeighbors() {
+        this.neighbors.clear();
+    }
+
+    public ArrayList<Edge> getEdges() {
+        return edges;
+    }
+
+    public LatticeMotionModel getLatticeMotionModel() {
+        return latticeMotionModel;
     }
 
     public TrustLevel getTrustLevel() {
@@ -77,6 +84,7 @@ public class LatticeRobot extends Robot implements Communicatable {
     /** {@inheritDoc} */
     @Override
     public void processMessages() {
+        clearEdges();
         commsSystem.syncPeers(neighbors);
         commsSystem.processMessages();
     }
@@ -87,8 +95,10 @@ public class LatticeRobot extends Robot implements Communicatable {
      */
     public void executeTimeStep(double timeStep) {
         if(!inCongestedArea) {
+            commsSystem.resetCommunicationState();
             processMessages();
             commsSystem.broadcastAssignment();
+
             //Retrieve assignment from previous time step
             OrientedPoint[] assignment = commsSystem.retrieveAssignmentLocation();
             OrientedPoint parentPose = assignment[0];
@@ -102,20 +112,18 @@ public class LatticeRobot extends Robot implements Communicatable {
             //If you are unassigned, begin run away procedure
             if(!commsSystem.isAssigned()) {
                 inCongestedArea = true;
+                clearEdges();
+                commsSystem.resetCommunicationState();
                 return;
             }
 
             //retrieve the intermediate point between target position and parent
             OrientedPoint newIntermediatePose = latticeMotionModel.getIntermediatePose(this.pose, parentPose, newAssignment, timeStep);
 
-            //Adopt intermediate position if it is a significant difference away from 
-            if(assignedPosition == null || newIntermediatePose.distance(assignedPosition) > latticeMotionModel.getAssignmentChangeThreshold()) {
+            //Adopt intermediate position if it is a significant difference away from
+            if(!pose.equals(newIntermediatePose)) { 
                 assignedPosition = newIntermediatePose;
-                motionModel.startMoving();
-            } else {
-                assignedPosition = newIntermediatePose; // update quietly without resetting motion
             }
-            commsSystem.resetCommunicationState();
         }     
     }
     
@@ -127,11 +135,28 @@ public class LatticeRobot extends Robot implements Communicatable {
             if(completedRepositionMovement) {
                 inCongestedArea = false;
                 assignedPosition = this.pose;
-                commsSystem.resetCommunicationState();
             }
             return;
         }
         latticeMotionModel.moveTo(pose, assignedPosition, dt);
         
+    }
+
+    public int compareTo(LatticeRobot robot) {
+        if(this.robotId < robot.getRobotId()) {
+            return -1;
+        } else if (this.robotId > robot.getRobotId()) {
+            return 1;
+        } else {
+            return 0;
+        }
+    }
+
+    public void dataDump() {
+        System.out.println("ID: " + robotId + 
+        "\nRole: " + (commsSystem.isRoot() ? "Root" : (commsSystem.isAssigned() ? "Assigned Child" : "Orphan")) +
+        "\nPose = " + pose +
+        "\nAssignment: " + assignedPosition + 
+        "\nParent: " + commsSystem.parentId);
     }
 }
