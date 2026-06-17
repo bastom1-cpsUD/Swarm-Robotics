@@ -8,7 +8,6 @@ import java.util.stream.Collectors;
  * body transformation T(e) and v -> w has an inverse edge w -> v with transformation T(e)^-1.*/
 public abstract class LatticeGraph {
     protected HashMap<Vertex, ArrayList<LatticeEdge>> edges;
-
     public LatticeGraph() {
         edges = new HashMap<>();
     }
@@ -34,5 +33,7 @@ public abstract class LatticeGraph {
     public Vertex getPrimaryVertex() {
         return (Vertex) edges.keySet().toArray()[0]; // Assuming the first vertex is the primary vertex
     }
+
+    abstract int getNumberOfVertices();
 }
 

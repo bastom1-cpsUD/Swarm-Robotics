@@ -24,13 +24,16 @@ public class LatticeEdge {
      */
     private boolean isNull;
 
+    private int Id;
+
     /**
      * Constructs a lattice edge from a source vertex to a target vertex with a specified pose, and computes the corresponding rigid body transformation.
      * @param from the source vertex of the edge
      * @param to the target vertex of the edge
      * @param pose the pose of the target vertex relative to the source vertex, used to compute the edge's rigid body transformation
      */
-    public LatticeEdge(Vertex from, Vertex to, OrientedPoint pose) {
+    public LatticeEdge(int Id, Vertex from, Vertex to, OrientedPoint pose) {
+        this.Id = Id;
         this.from = from;
         this.to = to;
         this.toPos = pose;
@@ -47,6 +50,10 @@ public class LatticeEdge {
         this.toPos = null;
         this.transformation = null;
         this.isNull = true;
+    }
+
+    public int getId() {
+        return Id;
     }
 
     public Vertex getFrom() {
@@ -75,6 +82,23 @@ public class LatticeEdge {
 
     @Override
     public String toString() {
-        return "LatticeEdge[From: " + this.from + " To: " + this.to + " Pose: " + this.toPos + " Null: " + isNull + "]";
+        return "LatticeEdge[ID: " + Id + " From: " + this.from + " To: " + this.to + " Pose: " + this.toPos + " Null: " + isNull + "]";
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if(this == o) {
+            return true;
+        } else if(!(o instanceof LatticeEdge)) {
+            return false;
+        }
+
+        LatticeEdge other = (LatticeEdge) o;
+
+        return this.getId() == other.getId() 
+            && this.getFrom().equals(other.getFrom())
+            && this.getTo().equals(other.getTo())
+            && this.getToPos().equals(other.getToPos())
+            && this.isNull() == other.isNull();
     }
 }

@@ -1,4 +1,4 @@
-package org.communicationModels;
+package org.communicationModels.SongOkaneComms;
 
 import java.util.PriorityQueue;
 

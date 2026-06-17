@@ -1,4 +1,4 @@
-package org.communicationModels;
+package org.communicationModels.SongOkaneComms;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -13,6 +13,8 @@ import org.graphs.OrientedPoint;
 import org.graphs.RigidBodyTransformation;
 import org.robots.LatticeRobot;
 import org.simulation.Edge;
+import org.communicationModels.Observation;
+import org.communicationModels.TrustLevel;
 import org.communicationModels.HungarianAlgo.HungarianAlgo;
 import org.communicationModels.HungarianAlgo.HungarianMatrixUtils;
 import org.graphs.LatticeEdge;

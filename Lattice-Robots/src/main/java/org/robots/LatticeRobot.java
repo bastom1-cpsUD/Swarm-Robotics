@@ -1,14 +1,11 @@
 package org.robots;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
 
-import org.communicationModels.Communicatable;
-import org.communicationModels.DecentralizedComms;
-import org.communicationModels.Message;
 import org.communicationModels.TrustLevel;
+import org.communicationModels.SongOkaneComms.Communicatable;
+import org.communicationModels.SongOkaneComms.DecentralizedComms;
+import org.communicationModels.SongOkaneComms.Message;
 import org.drawingModels.TriangularModel;
 
 import org.graphs.OrientedPoint;
