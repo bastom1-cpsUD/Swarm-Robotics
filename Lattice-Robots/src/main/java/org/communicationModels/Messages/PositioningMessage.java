@@ -1,5 +1,7 @@
 package org.communicationModels.Messages;
 
+import java.util.ArrayList;
+
 import org.graphs.LatticeEdge;
 
 public class PositioningMessage extends AbstractMessage {
@@ -11,37 +13,25 @@ public class PositioningMessage extends AbstractMessage {
      * The ID of the root whose cycle is being built
      */
     private int rootId;
-    /**
-     * Whether the message is being used to assign or propogate a confirmation chain
-     */
-    private boolean isConfirmation;
-
+    
+    private ArrayList<Integer> chainList;
     /**
      * Constructor for a positioning message
      * @param senderId the ID of the sender
      * @param recipient the ID of the recipient
      * @param currentEdge the edge being assigned to the recipient
      * @param rootId the ID of the root whose cycle is being built
-     * @param isConfirmation whether the message is being used to assign or propagate a confirmation chain
      */
-    public PositioningMessage(int senderId, int recipient, LatticeEdge currentEdge, int rootId, boolean isConfirmation) {
+    public PositioningMessage(int senderId, int recipient, LatticeEdge currentEdge, int rootId, ArrayList<Integer> chainList) {
         super(senderId, recipient);
         this.currentEdge = currentEdge;
         this.rootId = rootId;
-        this.isConfirmation = isConfirmation;
+        this.chainList = chainList;
     }
 
     /**{@inheritDoc} */
     public String getMessageType() {
-        return isConfirmation ? "Confirmation" : "Assignment";
-    }
-
-    /**
-     * Determines whether the message is used for confirmation or assignment
-     * @return true if the message is used for confirmation, false otherwise
-    */
-    public boolean isConfirmation() {
-        return isConfirmation;
+        return "Assignment";
     }
 
     /**
@@ -50,6 +40,14 @@ public class PositioningMessage extends AbstractMessage {
      */
     public int getRootId() {
         return rootId;
+    }
+
+    /**
+     * Retrieves the list of robots in the chain
+     * @return
+     */
+    public ArrayList<Integer> getChainList() {
+        return chainList;
     }
 
     /**
