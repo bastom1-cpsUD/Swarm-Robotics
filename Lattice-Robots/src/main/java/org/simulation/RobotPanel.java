@@ -177,6 +177,7 @@ public class RobotPanel extends JPanel {
             proximityCheckForAllRobots();
 
             for (GeometricCycleLatticeRobot robot : robots.values()) {
+                proximityCheckForAllRobots();
                 robot.executeTimeStep(timeStep);
             }
         }

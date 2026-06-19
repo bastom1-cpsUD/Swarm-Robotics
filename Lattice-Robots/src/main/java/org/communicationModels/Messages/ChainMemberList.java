@@ -35,6 +35,10 @@ public class ChainMemberList {
         return chainList.contains(ID);
     }
 
+    public boolean isEmpty() {
+        return chainList.isEmpty();
+    }
+
     @Override
     public boolean equals(Object o) {
         if(this == o) {

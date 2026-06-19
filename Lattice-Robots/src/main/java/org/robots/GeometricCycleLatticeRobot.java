@@ -123,8 +123,9 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
         }
 
         // 3. Broadcast logic (NEW API)
-        boolean atPos = (target != null &&
-                pose.distance(target) <= AT_POSITION_THRESHOLD);
+        boolean atPos = (target != null
+                && pose.distance(target) < AT_POSITION_THRESHOLD)
+                && TimeStepDiffDrive.normalizeAngle(pose.getOrientation() - target.getOrientation()) < 1e-3;
 
         commsSystem.broadcastMessage(atPos);
     }
