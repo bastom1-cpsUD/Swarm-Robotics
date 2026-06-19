@@ -8,113 +8,204 @@ import org.communicationModels.CyclebuilderComms;
 import org.communicationModels.TrustLevel;
 import org.communicationModels.Messages.AbstractMessage;
 import org.drawingModels.TriangularModel;
+import org.graphs.HexagonLattice;
+import org.graphs.LatticeGraph;
 import org.graphs.OrientedPoint;
 import org.motionModels.LatticeMotionModel;
 import org.motionModels.TimeStepDiffDrive;
 import org.simulation.Edge;
 
-public class GeometricCycleLatticeRobot extends Robot implements Communicatable{
+/**
+ * Robot participating in geometric cycle-building lattice formation.
+ */
+public class GeometricCycleLatticeRobot extends Robot implements Communicatable {
 
-    //Local knowledge & edges
-    private CyclebuilderComms commsSystem;
+    // ------------------------------------------------------------
+    // Constants
+    // ------------------------------------------------------------
+    public static final double COMM_RANGE = 75.0;
+    private static final double AT_POSITION_THRESHOLD = 3.0;
+
+    // ------------------------------------------------------------
+    // Fields
+    // ------------------------------------------------------------
+    private final CyclebuilderComms commsSystem;
+    private final LatticeMotionModel latticeMotionModel;
+
     private ArrayList<Edge> edges;
     private ArrayList<GeometricCycleLatticeRobot> neighbors;
 
-    private final LatticeMotionModel latticeMotionModel;
-    public final static double COMM_RANGE = 75.0;
     private OrientedPoint assignedPosition;
     private boolean inCongestedArea;
 
-    
+    // ------------------------------------------------------------
+    // Constructor
+    // ------------------------------------------------------------
     public GeometricCycleLatticeRobot(int id, OrientedPoint pose) {
+        this(id, pose, new HexagonLattice());
+    }
+
+    public GeometricCycleLatticeRobot(int id, OrientedPoint pose, LatticeGraph graph) {
         super(id, pose, new TimeStepDiffDrive(), new TriangularModel());
+
         this.latticeMotionModel = (LatticeMotionModel) motionModel;
-        this.commsSystem = null;
+
+        // NEW comms system (no graph passed in anymore)
+        this.commsSystem = new CyclebuilderComms(this);
+
         this.edges = new ArrayList<>();
         this.neighbors = new ArrayList<>();
+
         this.inCongestedArea = false;
+
+        this.assignedPosition = new OrientedPoint(pose);
     }
 
-    public void setTrustLevel(TrustLevel trust) {
-        //MUST IMPLEMENT  
-    }
-
+    // ------------------------------------------------------------
+    // Neighbor handling
+    // ------------------------------------------------------------
     public void addNeighbor(GeometricCycleLatticeRobot other) {
-        this.neighbors.add(other);
-
+        if (!neighbors.contains(other)) neighbors.add(other);
     }
 
-    public void removeNeighbor(GeometricCycleLatticeRobot neighbor) {
-        this.neighbors.remove(neighbor);
+    public void removeNeighbor(GeometricCycleLatticeRobot other) {
+        neighbors.remove(other);
+    }
 
+    public void clearNeighbors() {
+        neighbors.clear();
     }
 
     public ArrayList<GeometricCycleLatticeRobot> getNeighbors() {
         return new ArrayList<>(Collections.unmodifiableList(neighbors));
     }
 
-    public void addEdge(Edge edge) {
-        this.edges.add(edge);
+    // ------------------------------------------------------------
+    // Edge visualization
+    // ------------------------------------------------------------
+    public void addEdge(Edge e) { edges.add(e); }
+    public void clearEdges() { edges.clear(); }
+    public ArrayList<Edge> getEdges() { return edges; }
+
+    // ------------------------------------------------------------
+    // Messaging interface
+    // ------------------------------------------------------------
+    @Override
+    public void enqueueMessage(AbstractMessage msg) {
+        commsSystem.enqueueMessage(msg);
     }
 
-    public void clearEdges() {
-        this.edges.clear();
+    @Override
+    public void processMessages() {
+        commsSystem.makeObservations();
+        commsSystem.processMessages();
     }
 
-    public void clearNeighbors() {
-        this.neighbors.clear();
+    // ------------------------------------------------------------
+    // Main time-step
+    // ------------------------------------------------------------
+    public void executeTimeStep(double dt) {
+        if (inCongestedArea) return;
+
+        // 1. Update observations + process incoming messages
+        processMessages();
+
+        // 2. Ask comms system for current target
+        OrientedPoint target = commsSystem.getAssignedGlobalPosition();
+
+        if (target != null) {
+            double dist = pose.distance(target);
+            if (dist > AT_POSITION_THRESHOLD) {
+                assignedPosition = target;
+            } else {
+                assignedPosition = target;
+            }
+        }
+
+        // 3. Broadcast logic (NEW API)
+        boolean atPos = (target != null &&
+                pose.distance(target) <= AT_POSITION_THRESHOLD);
+
+        commsSystem.broadcastMessage(atPos);
     }
 
-    public ArrayList<Edge> getEdges() {
-        return edges;
+    // ------------------------------------------------------------
+    // Motion
+    // ------------------------------------------------------------
+    @Override
+    public void move(double dt) {
+        if (inCongestedArea) {
+            boolean done = motionModel.move(pose, dt);
+            if (done) {
+                inCongestedArea = false;
+                assignedPosition = new OrientedPoint(pose);
+            }
+            return;
+        }
+
+        if (assignedPosition != null) {
+            latticeMotionModel.moveTo(pose, assignedPosition, dt);
+        }
     }
 
+    // ------------------------------------------------------------
+    // Visualization edges (simplified: no old parent logic)
+    // ------------------------------------------------------------
+    private void updateEdges() {
+        clearEdges();
+
+        // Optional: keep only debug visualization if comms exposes role
+        // Example (if you add getRole()):
+        //
+        // if (commsSystem.getRole() == CycleRole.cycleBuilder) { ... }
+
+        // Left intentionally minimal because new comms system
+        // handles structure internally via messages
+    }
+
+    // ------------------------------------------------------------
+    // Accessors
+    // ------------------------------------------------------------
     public LatticeMotionModel getLatticeMotionModel() {
         return latticeMotionModel;
     }
 
+    public boolean isActiveInChain() {
+        return commsSystem.isRoot() || commsSystem.isCycleBuilder();
+    }
+
     public TrustLevel getTrustLevel() {
-        return null;
+        return commsSystem.getTrustLevel();
     }
 
-    /** {@inheritDoc} */
-    @Override
-    public void enqueueMessage(AbstractMessage msg) {
+    public void setTrustLevel(TrustLevel trust) {
+        commsSystem.setTrustLevel(trust);
     }
 
-    /** {@inheritDoc} */
-    @Override
-    public void processMessages() {
-
-    }
-    
-    /**
-     * Executes a timestep of the robot's algorithmic behavior, which includes local communication, task assignment, the broadcasting of the assignment, and movement.
-     * @param timeStep the duration of the time step to be executed
-     */
-    public void executeTimeStep(double timeStep) {
-        
-    }
-    
-    /** {@inheritDoc} */
-    @Override
-    public void move(double dt) {
-       
+    public void promoteToRoot() {
+        commsSystem.promoteToPriamaryRoot();
     }
 
-    public int compareTo(GeometricCycleLatticeRobot robot) {
-        if(this.robotId < robot.getRobotId()) {
-            return -1;
-        } else if (this.robotId > robot.getRobotId()) {
-            return 1;
-        } else {
-            return 0;
-        }
+    public void promoteToPrimaryRoot() {
+        commsSystem.promoteToPriamaryRoot();
     }
 
+    // ------------------------------------------------------------
+    // Debug
+    // ------------------------------------------------------------
     public void dataDump() {
-        
+        System.out.printf(
+            "[Robot %d] pose=%s target=%s%n",
+            robotId,
+            pose,
+            assignedPosition
+        );
     }
 
-    
+    // ------------------------------------------------------------
+    // Comparable
+    // ------------------------------------------------------------
+    public int compareTo(GeometricCycleLatticeRobot other) {
+        return Integer.compare(this.robotId, other.robotId);
+    }
 }

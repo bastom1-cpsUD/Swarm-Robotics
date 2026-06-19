@@ -14,7 +14,9 @@ public class PositioningMessage extends AbstractMessage {
      */
     private int rootId;
     
-    private ArrayList<Integer> chainList;
+    private ChainMemberList chainList;
+
+    private LatticeEdge originEdge;
     /**
      * Constructor for a positioning message
      * @param senderId the ID of the sender
@@ -22,10 +24,10 @@ public class PositioningMessage extends AbstractMessage {
      * @param currentEdge the edge being assigned to the recipient
      * @param rootId the ID of the root whose cycle is being built
      */
-    public PositioningMessage(int senderId, int recipient, LatticeEdge currentEdge, int rootId, ArrayList<Integer> chainList) {
+    public PositioningMessage(int senderId, int recipient, LatticeEdge currentEdge, LatticeEdge originEdge, ChainMemberList chainList) {
         super(senderId, recipient);
         this.currentEdge = currentEdge;
-        this.rootId = rootId;
+        this.originEdge = originEdge;
         this.chainList = chainList;
     }
 
@@ -46,7 +48,7 @@ public class PositioningMessage extends AbstractMessage {
      * Retrieves the list of robots in the chain
      * @return
      */
-    public ArrayList<Integer> getChainList() {
+    public ChainMemberList getChainList() {
         return chainList;
     }
 
@@ -58,14 +60,19 @@ public class PositioningMessage extends AbstractMessage {
         return currentEdge;
     }
 
+    public LatticeEdge getOriginEdge() {
+        return originEdge;
+    }
+
     /**
      * Provides details of the message
      * @return a string with message details
      */
     private String getMessageInfo() {
         return super.messageInfo() + "\n"
-        + "Root ID: " + this.rootId + "\n" 
-        + "Lattice Edge: " + this.currentEdge;
+        + "Root ID: " + this.chainList.getRootID() + "\n" 
+        + "Lattice Edge: " + this.currentEdge + "\n"
+        + "Beginning Edge of Cycle: " + this.originEdge;
     }
 
     @Override
@@ -87,11 +94,13 @@ public class PositioningMessage extends AbstractMessage {
         PositioningMessage other = (PositioningMessage) o;
 
         return this.getRootId() == other.getRootId()
-            && this.getCurrentEdge().equals(other.getCurrentEdge());
+            && this.getCurrentEdge().equals(other.getCurrentEdge())
+            && this.originEdge.equals(other.getOriginEdge())
+            && this.chainList.equals(other.chainList);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(super.hashCode(), currentEdge, rootId);
+        return java.util.Objects.hash(super.hashCode(), currentEdge, rootId, originEdge, chainList);
     }
 }

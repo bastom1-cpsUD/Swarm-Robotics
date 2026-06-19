@@ -7,6 +7,7 @@ import java.awt.geom.AffineTransform;
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
 
+import org.robots.GeometricCycleLatticeRobot;
 import org.robots.LatticeRobot;
 
 public class Edge {
@@ -29,7 +30,7 @@ public class Edge {
         return toId;
     }
 
-    public void draw(Graphics2D g2d, LatticeRobot from, LatticeRobot to) {
+    public void draw(Graphics2D g2d, GeometricCycleLatticeRobot from, GeometricCycleLatticeRobot to) {
 
         Point2D pFrom = from.getPosition();
         Point2D pTo = to.getPosition();

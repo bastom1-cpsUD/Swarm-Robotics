@@ -13,12 +13,6 @@ import org.graphs.LatticeEdge;
 
     /**
 
-    * Root that initiated verification.
-        */
-        private final int rootID;
-
-    /**
-
     * The root edge whose cycle is being checked.
         */
         private final LatticeEdge cycleOrigin;
@@ -29,16 +23,18 @@ import org.graphs.LatticeEdge;
         */
         private final LatticeEdge currentEdge;
 
-    public VerificationMessage(int senderId, int recipient, int rootID, LatticeEdge cycleOrigin, LatticeEdge currentEdge) {
+        private ChainMemberList chainMemberList;
+
+    public VerificationMessage(int senderId, int recipient, LatticeEdge cycleOrigin, LatticeEdge currentEdge, ChainMemberList chainMemberList) {
         super(senderId, recipient);
 
-        this.rootID = rootID;
         this.cycleOrigin = cycleOrigin;
         this.currentEdge = currentEdge;
+        this.chainMemberList = chainMemberList;
     }
 
-    public int getRootID() {
-        return rootID;
+    public ChainMemberList getChainList() {
+        return chainMemberList;
     }
 
     public LatticeEdge getCycleOrigin() {
@@ -56,7 +52,7 @@ import org.graphs.LatticeEdge;
 
     private String getMessageInfo() {
         return super.messageInfo() + "\n"
-        + "Root ID: " + this.rootID + "\n" 
+        + "Root ID: " + this.chainMemberList.getRootID() + "\n" 
         + "Current Lattice Edge: " + this.currentEdge + "\n"
         + "Beginning Edge of Cycle: " + this.cycleOrigin;
     }

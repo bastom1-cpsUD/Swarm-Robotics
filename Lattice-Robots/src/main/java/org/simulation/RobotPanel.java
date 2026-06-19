@@ -22,20 +22,20 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.time.LocalDateTime;
 
-import org.robots.LatticeRobot;
+import org.robots.GeometricCycleLatticeRobot;
 import org.communicationModels.TrustLevel;
 import org.graphs.OrientedPoint;
 
 public class RobotPanel extends JPanel {
-    private static Map<Integer, LatticeRobot> robots;
-    private static LatticeRobot selectedRobot = null;
+    private static Map<Integer, GeometricCycleLatticeRobot> robots;
+    private static GeometricCycleLatticeRobot selectedRobot = null;
     private static boolean dragging = false;
     private static boolean displayRobotProximity = false;
     private static double offsetX;
     private static double offsetY;
 
     public RobotPanel() {
-        robots = new LinkedHashMap<Integer, LatticeRobot>();
+        robots = new LinkedHashMap<Integer, GeometricCycleLatticeRobot>();
         this.setPreferredSize(new java.awt.Dimension(900, 900));
         this.setBackground(java.awt.Color.WHITE);
         this.setFocusable(true);
@@ -46,10 +46,10 @@ public class RobotPanel extends JPanel {
             @Override
             public void mousePressed(MouseEvent e) {
 
-                LatticeRobot hitRobot = null;
+                GeometricCycleLatticeRobot hitRobot = null;
 
                 //Check if a robot was clicked
-                for (LatticeRobot robot : robots.values()) {
+                for (GeometricCycleLatticeRobot robot : robots.values()) {
                     if (robot.contains(e.getX(), e.getY())) {
                         hitRobot = robot;
                         break;
@@ -61,6 +61,7 @@ public class RobotPanel extends JPanel {
 
                     //FOR TESTING ONLY
                     hitRobot.dataDump();
+                    hitRobot.promoteToPrimaryRoot();
 
                     offsetX = e.getX() - hitRobot.getPosition().x;
                     offsetY = e.getY() - hitRobot.getPosition().y;
@@ -175,14 +176,14 @@ public class RobotPanel extends JPanel {
 
             proximityCheckForAllRobots();
 
-            for (LatticeRobot robot : robots.values()) {
+            for (GeometricCycleLatticeRobot robot : robots.values()) {
                 robot.executeTimeStep(timeStep);
             }
         }
 
         // Movement — always runs after the state block above
         if(firstStateUpdated[0]) {
-            for (LatticeRobot robot : robots.values()) {
+            for (GeometricCycleLatticeRobot robot : robots.values()) {
                 robot.move(dt);
             }
         }   
@@ -199,12 +200,12 @@ public class RobotPanel extends JPanel {
         if(displayRobotProximity) {
             drawRobotProximity(g2d);
         }
-        for(LatticeRobot robot : robots.values()) {
+        for(GeometricCycleLatticeRobot robot : robots.values()) {
             //Draw edges
             robot.getEdges().forEach(edge -> {
                 //Retrieve the 'to' robot
-                LatticeRobot to = robots.get(edge.getToId());
-                LatticeRobot from = robots.get(edge.getFromId());
+                GeometricCycleLatticeRobot to = robots.get(edge.getToId());
+                GeometricCycleLatticeRobot from = robots.get(edge.getFromId());
                 //Draw the edge
                 edge.draw(g2d, from, to);
             });
@@ -212,7 +213,7 @@ public class RobotPanel extends JPanel {
         
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g2d.setColor(Color.BLACK);
-        for(LatticeRobot robot : robots.values()) {
+        for(GeometricCycleLatticeRobot robot : robots.values()) {
             g2d.fill(robot.draw());
         }
     }
@@ -269,7 +270,7 @@ public class RobotPanel extends JPanel {
             ArrayNode robotsArray = mapper.createArrayNode();
             
             //Create a node for each robot's data and add to array
-            for(LatticeRobot robot : robots.values()) {
+            for(GeometricCycleLatticeRobot robot : robots.values()) {
                 ObjectNode robotNode = mapper.createObjectNode();
                 OrientedPoint robotPose = robot.getPosition();
 
@@ -295,7 +296,7 @@ public class RobotPanel extends JPanel {
             ArrayNode edgesArray = mapper.createArrayNode();
             
             //Create a node for each edge to store data
-            for(LatticeRobot robot : robots.values()) {
+            for(GeometricCycleLatticeRobot robot : robots.values()) {
                 
                 //Create a node for each edge's data
                 for(Edge edge : robot.getEdges()) {
@@ -324,7 +325,7 @@ public class RobotPanel extends JPanel {
             ArrayNode trustArray = mapper.createArrayNode();
 
             //Create a node for each robot's trust level
-            for(LatticeRobot robot : robots.values()) {
+            for(GeometricCycleLatticeRobot robot : robots.values()) {
                 ObjectNode trustNode = mapper.createObjectNode();
 
                 //Add data to node
@@ -396,7 +397,7 @@ public class RobotPanel extends JPanel {
 
                     //Create robot and add to panel map
                     OrientedPoint robotPosition = new OrientedPoint(x, y, orientation);
-                    LatticeRobot importedRobot = new LatticeRobot(robotId, robotPosition);
+                    GeometricCycleLatticeRobot importedRobot = new GeometricCycleLatticeRobot(robotId, robotPosition);
                     robots.put(robotId, importedRobot);
                 }
             }
@@ -416,8 +417,8 @@ public class RobotPanel extends JPanel {
                     int toId = edgeNode.get("toId").asInt();
 
                     //Create edge between robots
-                    LatticeRobot fromRobot = robots.get(fromId);
-                    LatticeRobot toRobot = robots.get(toId);
+                    GeometricCycleLatticeRobot fromRobot = robots.get(fromId);
+                    GeometricCycleLatticeRobot toRobot = robots.get(toId);
 
                     if(fromRobot != null && toRobot != null) {
                         fromRobot.addNeighbor(toRobot);
@@ -441,7 +442,7 @@ public class RobotPanel extends JPanel {
                     TrustLevel trust = TrustLevel.valueOf(trustLevelStr);
 
                     //Assign trust level
-                    LatticeRobot robot = robots.get(robotId);
+                    GeometricCycleLatticeRobot robot = robots.get(robotId);
                     if(robot != null) {
                         robot.setTrustLevel(trust);
                     }
@@ -458,12 +459,12 @@ public class RobotPanel extends JPanel {
     }
     
     public static void proximityCheckForAllRobots() {
-        for(LatticeRobot robot : robots.values()) {
+        for(GeometricCycleLatticeRobot robot : robots.values()) {
             robot.clearNeighbors();
-            for(LatticeRobot other : robots.values()) {
+            for(GeometricCycleLatticeRobot other : robots.values()) {
                 if(robot.getRobotId() != other.getRobotId()) {
                     double distance = robot.getPosition().distance(other.getPosition());
-                    if(distance <= LatticeRobot.COMM_RANGE) {
+                    if(distance <= GeometricCycleLatticeRobot.COMM_RANGE) {
                         robot.addNeighbor(other);
                     } else {
                         robot.removeNeighbor(other);
@@ -478,11 +479,11 @@ public class RobotPanel extends JPanel {
             return;
         }
         Graphics2D g2d = (Graphics2D) g;
-        for(LatticeRobot robot: robots.values()) {
+        for(GeometricCycleLatticeRobot robot: robots.values()) {
             double x = robot.getPosition().x;
             double y = robot.getPosition().y;
 
-            double proximityThreshold = LatticeRobot.COMM_RANGE;
+            double proximityThreshold = GeometricCycleLatticeRobot.COMM_RANGE;
 
             Ellipse2D.Double proximityCircle = new Ellipse2D.Double(x - proximityThreshold, y - proximityThreshold, proximityThreshold * 2, proximityThreshold * 2);
 
