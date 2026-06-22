@@ -183,7 +183,7 @@ public class RobotPanel extends JPanel {
 
              proximityCheckForAllRobots();
         }
-
+         proximityCheckForAllRobots();
         // Movement — always runs after the state block above
         if(firstStateUpdated[0]) {
             for (GeometricCycleLatticeRobot robot : robots.values()) {
