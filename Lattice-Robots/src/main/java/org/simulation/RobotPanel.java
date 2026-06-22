@@ -180,6 +180,8 @@ public class RobotPanel extends JPanel {
                 proximityCheckForAllRobots();
                 robot.executeTimeStep(timeStep);
             }
+
+             proximityCheckForAllRobots();
         }
 
         // Movement — always runs after the state block above

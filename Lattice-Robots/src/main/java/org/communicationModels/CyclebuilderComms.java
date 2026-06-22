@@ -297,7 +297,9 @@ public class CyclebuilderComms extends CommunicationSystem {
             if(distance < smallestDistance) {
                 smallestDistance = distance;
                 bestNeighborID = obs.getId();
-                System.out.println("New best candididate: " + obs.getId());
+                System.out.println("New best candididate: " + obs.getId() + " with distance: " + distance);
+            } else {
+                System.out.println("Canidadate denied: " + obs.getId() + " with distance: " + distance);
             }
         }
 
