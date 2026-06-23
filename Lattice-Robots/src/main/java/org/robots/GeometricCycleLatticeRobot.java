@@ -2,8 +2,10 @@ package org.robots;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.function.DoubleBinaryOperator;
 
 import org.communicationModels.Communicatable;
+import org.communicationModels.CycleRole;
 import org.communicationModels.CyclebuilderComms;
 import org.communicationModels.TrustLevel;
 import org.communicationModels.Messages.AbstractMessage;
@@ -24,7 +26,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // Constants
     // ------------------------------------------------------------
     public static final double COMM_RANGE = 75.0;
-    private static final double AT_POSITION_THRESHOLD = 3.0;
+    private static final double AT_POSITION_THRESHOLD = 1e-5;
 
     // ------------------------------------------------------------
     // Fields
@@ -97,7 +99,6 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
 
     @Override
     public void processMessages() {
-        commsSystem.makeObservations();
         commsSystem.processMessages();
     }
 
@@ -107,27 +108,40 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     public void executeTimeStep(double dt) {
         if (inCongestedArea) return;
 
-        // 1. Update observations + process incoming messages
-        processMessages();
+        switch(getRole()) {
+            case CycleRole.root -> {
+                commsSystem.makeObservations();
+                processMessages();
+                commsSystem.broadcastMessage(true);
+            }
+            default -> {
+                // 1. Update observations + process incoming messages
+                processMessages();
 
-        // 2. Ask comms system for current target
-        OrientedPoint target = commsSystem.getAssignedGlobalPosition();
+                // 2. Ask comms system for current target
+                OrientedPoint target = commsSystem.getAssignedGlobalPosition();
 
-        if (target != null) {
-            double dist = pose.distance(target);
-            if (dist > AT_POSITION_THRESHOLD) {
-                assignedPosition = target;
-            } else {
-                assignedPosition = target;
+                if (target != null) {
+                    double dist = pose.distance(target);
+                    if (dist > AT_POSITION_THRESHOLD) {
+                        assignedPosition = target;
+                    } else {
+                        assignedPosition = target;
+                    }
+                }
+
+                // 3. Broadcast logic (NEW API)
+                boolean atPos = (target != null
+                        && pose.distance(target) < AT_POSITION_THRESHOLD)
+                        && Double.compare(pose.orientation, target.orientation) == 0;
+                
+                commsSystem.makeObservations();
+
+                commsSystem.broadcastMessage(atPos);
             }
         }
 
-        // 3. Broadcast logic (NEW API)
-        boolean atPos = (target != null
-                && pose.distance(target) < AT_POSITION_THRESHOLD)
-                && TimeStepDiffDrive.normalizeAngle(pose.getOrientation() - target.getOrientation()) < 1e-3;
-
-        commsSystem.broadcastMessage(atPos);
+        
     }
 
     // ------------------------------------------------------------
@@ -171,8 +185,8 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
         return latticeMotionModel;
     }
 
-    public boolean isActiveInChain() {
-        return commsSystem.isRoot() || commsSystem.isCycleBuilder();
+    public CycleRole getRole() {
+        return commsSystem.getRole();
     }
 
     public TrustLevel getTrustLevel() {

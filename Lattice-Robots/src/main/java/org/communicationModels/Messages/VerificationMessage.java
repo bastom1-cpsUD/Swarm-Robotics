@@ -50,6 +50,10 @@ import org.graphs.LatticeEdge;
         return "Verification";
     }
 
+    public int getPriority() {
+        return 4;
+    }
+
     private String getMessageInfo() {
         return super.messageInfo() + "\n"
         + "Root ID: " + this.chainMemberList.getRootID() + "\n" 

@@ -42,7 +42,7 @@ java {
 
 application {
     // Define the main class for the application.
-    mainClass.set("org.simulation.RobotPanel")
+    mainClass.set("org.simulation.AsynchSim.AsyncRobotPanel")
 }
 
 

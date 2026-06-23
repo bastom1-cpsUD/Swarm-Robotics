@@ -3,6 +3,8 @@ package org.communicationModels;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map.Entry;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.PriorityBlockingQueue;
 
 import org.communicationModels.Messages.AbstractMessage;
 import org.communicationModels.Messages.ChainMemberList;
@@ -51,6 +53,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.assignedEdge = new LatticeEdge();
         this.self = self;
         this.observations = new HashMap<>();
+        this.incomingMessages = new PriorityBlockingQueue<>();
     }
 
     public void makeObservations() {
@@ -71,9 +74,10 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     @Override
     public void processMessages() {
+        AbstractMessage peek = incomingMessages.peek();
         if(incomingMessages.isEmpty()) {
             return;
-        }
+        } 
         AbstractMessage next = incomingMessages.poll();
         log("Received " + next.getMessageType() + " from robot " + next.getSenderId());
         switch(role) {
@@ -95,8 +99,9 @@ public class CyclebuilderComms extends CommunicationSystem {
                     chainMemberList = vm.getChainList();
                     log("-> became verifying: edge id=" + assignedEdge.getId());
                 } else if(next instanceof PromotionMessage pMessage) {
-                    role = CycleRole.root;
+                    
                     reset();
+                    role = CycleRole.root;
                     stableID = pMessage.getSenderId();
                     initializeEdgeMap();
                     log("-> promoted to root by robot " + stableID);
@@ -164,6 +169,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                 
                 if (targetEdge == null) {
                     promoteAdjacentVerticesToRoots();
+                    promoteSelfToStable();
                 }
                 /** 
                 // 1. Try to verify: Is there a neighbor at the edge's target position?
@@ -258,6 +264,11 @@ public class CyclebuilderComms extends CommunicationSystem {
         }
     }
 
+    private void promoteSelfToStable() {
+        role = CycleRole.stable;
+        //Add more stuff as needed
+    }
+
     private void initializeEdgeMap() {
         Vertex myVertex = getCurrentVertex();
         ArrayList<LatticeEdge> edges = graph.getOutgoingEdges(myVertex);
@@ -277,35 +288,65 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     private GeometricCycleLatticeRobot findBestNeighborForEdge(LatticeEdge targetEdge) {
         makeObservations();
-        OrientedPoint target = getTargetInLocalCoordinates(targetEdge);
+        OrientedPoint targetLocal  = getTargetInLocalCoordinates(targetEdge);
+
+        // Recover global coordinates for logging — apply self's local-to-global transform
+        RigidBodyTransformation localToGlobal = new RigidBodyTransformation(self.getPosition());
+        OrientedPoint targetGlobal = localToGlobal.apply(targetLocal);
+
         ArrayList<Observation> validObservations = new ArrayList<>();
         int rootID = chainMemberList.isEmpty() ? -1 : chainMemberList.getRootID();
-        for(Observation obs : observations.values()) {
+        for (Observation obs : observations.values()) {
             int robotID = obs.getId();
-            if(robotID == rootID || !chainMemberList.isInList(robotID)) {
+            if (robotID == rootID || !chainMemberList.isInList(robotID)) {
                 validObservations.add(obs);
-                System.out.println("Included robot " + robotID + " in the consideration");
+                OrientedPoint candidateGlobal = localToGlobal.apply(obs.getLocalPosition());
+                log("Included robot " + robotID + " in consideration"
+                        + " — global pos: (" + String.format("%.1f", candidateGlobal.x)
+                        + ", " + String.format("%.1f", candidateGlobal.y) + ")");
             } else {
-                System.out.println("Discarded robot " + robotID + " from consideration");
+                log("Discarded robot " + robotID + " from consideration (already in chain)");
             }
         }
 
         int bestNeighborID = -1;
         double smallestDistance = Double.MAX_VALUE;
-        for(Observation obs : validObservations) {
-            double distance = target.distance(obs.getLocalPosition());
-            if(distance < smallestDistance) {
+        for (Observation obs : validObservations) {
+            double distance = targetLocal.distance(obs.getLocalPosition());
+            OrientedPoint candidateGlobal = localToGlobal.apply(obs.getLocalPosition());
+            if (distance < smallestDistance) {
+                if (bestNeighborID != -1) {
+                    log("Robot " + bestNeighborID + " displaced by robot " + obs.getId()
+                            + " — robot " + obs.getId()
+                            + " global pos: (" + String.format("%.1f", candidateGlobal.x)
+                            + ", " + String.format("%.1f", candidateGlobal.y) + ")"
+                            + ", distance to target: " + String.format("%.2f", distance)
+                            + " < " + String.format("%.2f", smallestDistance));
+                }
                 smallestDistance = distance;
                 bestNeighborID = obs.getId();
-                System.out.println("New best candididate: " + obs.getId() + " with distance: " + distance);
+                log("New best candidate: robot " + obs.getId()
+                        + " — global pos: (" + String.format("%.1f", candidateGlobal.x)
+                        + ", " + String.format("%.1f", candidateGlobal.y) + ")"
+                        + ", distance to target global pos ("
+                        + String.format("%.1f", targetGlobal.x) + ", "
+                        + String.format("%.1f", targetGlobal.y) + "): "
+                        + String.format("%.2f", distance));
             } else {
-                System.out.println("Canidadate denied: " + obs.getId() + " with distance: " + distance);
+                log("Candidate robot " + obs.getId() + " denied"
+                        + " — global pos: (" + String.format("%.1f", candidateGlobal.x)
+                        + ", " + String.format("%.1f", candidateGlobal.y) + ")"
+                        + ", distance to target global pos ("
+                        + String.format("%.1f", targetGlobal.x) + ", "
+                        + String.format("%.1f", targetGlobal.y) + "): "
+                        + String.format("%.2f", distance)
+                        + " (current best: robot " + bestNeighborID
+                        + " at " + String.format("%.2f", smallestDistance) + ")");
             }
         }
 
         return getNeighborByID(bestNeighborID);
     }
-
     /**
      * Helper method to find a neighbor currently sitting at the target local position.
      */
@@ -325,7 +366,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     private OrientedPoint getTargetInLocalCoordinates(LatticeEdge edge) {
-        return edge.getEdgeTransformation().apply(new OrientedPoint(0,0,0));
+        return edge.getToPos();
     }
 
     private void log(String msg) {

@@ -51,6 +51,10 @@
         return "VerificationResponse";
     }
 
+    public int getPriority() {
+        return 2;
+    }
+
     private String getMessageInfo() {
         return super.messageInfo() + "\n"
             + "Root ID: " + rootID + "\n"

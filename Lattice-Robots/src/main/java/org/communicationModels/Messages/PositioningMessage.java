@@ -64,6 +64,10 @@ public class PositioningMessage extends AbstractMessage {
         return originEdge;
     }
 
+    public int getPriority() {
+        return 3;
+    }
+
     /**
      * Provides details of the message
      * @return a string with message details

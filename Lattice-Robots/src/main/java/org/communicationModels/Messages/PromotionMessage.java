@@ -11,4 +11,8 @@ public class PromotionMessage extends AbstractMessage {
     public String getMessageType() {
         return "Promotion";
     }
+
+    public int getPriority() {
+        return 4;
+    }
 }

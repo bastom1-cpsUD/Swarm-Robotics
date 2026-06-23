@@ -3,7 +3,7 @@ package org.communicationModels.Messages;
 /**
  * An abstract message template for messages that will be used within the lattice formation problem.
  */
-public abstract class AbstractMessage implements Message{
+public abstract class AbstractMessage implements Message, Comparable<AbstractMessage> {
     /**
      * The sender ID of a message
      */
@@ -31,6 +31,8 @@ public abstract class AbstractMessage implements Message{
     /**{@inheritDoc} */
     abstract public String getMessageType();
 
+    abstract public int getPriority();
+
     @Override
     public String toString() {
         return this.messageInfo();
@@ -54,4 +56,11 @@ public abstract class AbstractMessage implements Message{
     public int hashCode() {
         return java.util.Objects.hash(senderId, recipient, this.getMessageType());
     }
+
+    @Override
+    public int compareTo(AbstractMessage msg) {
+        return Integer.compare(this.getPriority(), msg.getPriority());
+    }
+
+
 }

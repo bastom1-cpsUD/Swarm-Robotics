@@ -24,6 +24,10 @@ public class StatusMessage extends AbstractMessage {
         return "Status";
     }
 
+    public int getPriority() {
+        return 2;
+    }
+
     @Override
     public String toString() {
         return super.toString() + "\n"
