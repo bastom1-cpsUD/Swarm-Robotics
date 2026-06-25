@@ -26,7 +26,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // Constants
     // ------------------------------------------------------------
     public static final double COMM_RANGE = 75.0;
-    private static final double AT_POSITION_THRESHOLD = 1e-5;
+    private static final double AT_POSITION_THRESHOLD = 1e-3;
 
     // ------------------------------------------------------------
     // Fields
@@ -114,6 +114,11 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
                 processMessages();
                 commsSystem.broadcastMessage(true);
             }
+            case CycleRole.stable -> {
+                commsSystem.makeObservations();
+                processMessages();
+                commsSystem.broadcastMessage(true);
+            }
             default -> {
                 // 1. Update observations + process incoming messages
                 processMessages();
@@ -126,7 +131,8 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
                     if (dist > AT_POSITION_THRESHOLD) {
                         assignedPosition = target;
                     } else {
-                        assignedPosition = target;
+                        assignedPosition.x = pose.x;
+                        assignedPosition.y = pose.y;
                     }
                 }
 

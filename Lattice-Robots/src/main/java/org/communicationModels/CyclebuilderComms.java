@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.PriorityBlockingQueue;
 
 import org.communicationModels.Messages.AbstractMessage;
 import org.communicationModels.Messages.ChainMemberList;
@@ -53,7 +52,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.assignedEdge = new LatticeEdge();
         this.self = self;
         this.observations = new HashMap<>();
-        this.incomingMessages = new PriorityBlockingQueue<>();
+        this.incomingMessages = new ConcurrentLinkedQueue<>();
     }
 
     public void makeObservations() {
@@ -74,10 +73,34 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     @Override
     public void processMessages() {
-        AbstractMessage peek = incomingMessages.peek();
         if(incomingMessages.isEmpty()) {
+            if(role == CycleRole.stable) {
+                log("EMPTY");
+            }
             return;
         } 
+
+        if(self.getRobotId() == 37 && role == CycleRole.stable) {
+            log("I have " + incomingMessages.size() + " to handle");
+        } 
+
+        AbstractMessage peek = incomingMessages.peek();
+        // Root/stable must always accept a closing PositioningMessage — don't gate on pendingChildID
+        boolean bypassPendingGate = (role == CycleRole.root || role == CycleRole.stable)
+                && peek instanceof PositioningMessage;
+
+        if(VERBOSE) {
+            if(bypassPendingGate) {
+                log("Bypassing pending gate as a " + role);
+            } else {    
+                log("Cannot bypass pending gate");
+            }
+        }
+        if (!bypassPendingGate && pendingChildID != -1 && peek.getSenderId() != pendingChildID) {
+            incomingMessages.add(incomingMessages.poll());
+            return;
+        }
+        
         AbstractMessage next = incomingMessages.poll();
         log("Received " + next.getMessageType() + " from robot " + next.getSenderId());
         switch(role) {
@@ -98,11 +121,12 @@ public class CyclebuilderComms extends CommunicationSystem {
                     originEdge =  vm.getCycleOrigin();
                     chainMemberList = vm.getChainList();
                     log("-> became verifying: edge id=" + assignedEdge.getId());
-                } else if(next instanceof PromotionMessage pMessage) {
+                } else if(next instanceof PromotionMessage pm) {
                     
                     reset();
                     role = CycleRole.root;
-                    stableID = pMessage.getSenderId();
+                    stableID = pm.getSenderId();
+                    this.assignedEdge = pm.getCurrentEdge();
                     initializeEdgeMap();
                     log("-> promoted to root by robot " + stableID);
                 }
@@ -144,20 +168,31 @@ public class CyclebuilderComms extends CommunicationSystem {
                         log("-> verification confirmed cycle on edge " + vrm.getCycleOrigin().getId());
                     }
                     pendingChildID = -1; 
+                } else if(next instanceof PositioningMessage pm) {
+                    log("-> reached root, reporting SUCCESS, forwarding upstream");
+                    forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginEdge());
                 }
                 break;
             case CycleRole.stable:
-                break;
-            }
+                if(next instanceof PositioningMessage pm) {
+                    log("-> reached stable, reporting SUCCESS, forwarding upstream");
+                    forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginEdge());
+                }
+            break;
+        }
     }
+    
 
     public void broadcastMessage(boolean alreadyInPosition) {
+       
         switch (role) {
             case CycleRole.root: {
                 if(pendingChildID != -1) {
                     return; // Wait until current verification or building is complete
                 }
-
+                if(VERBOSE) {
+                     log("Sending Message...");
+                }
                 // Find the first outgoing edge that doesn't have a completed cycle yet
                 LatticeEdge targetEdge = null;
                 for (Entry<LatticeEdge, Boolean> entry : completedCycles.entrySet()) {
@@ -187,16 +222,23 @@ public class CyclebuilderComms extends CommunicationSystem {
                     ChainMemberList chainList = new ChainMemberList(self.getRobotId());
                     if (childToBuild != null) {
                         PositioningMessage pm = new PositioningMessage(self.getRobotId(), childToBuild.getRobotId(), targetEdge, targetEdge,chainList);
+                        log("enqueuing message to robot " + childToBuild.getRobotId());
                         childToBuild.enqueueMessage(pm);
                         self.addEdge(new Edge(self.getRobotId(), childToBuild.getRobotId()));
                         pendingChildID = childToBuild.getRobotId(); // Wait for status
                     }
+                    if(VERBOSE) {
+                    log("Message sent to " + childToBuild.getRobotId());
+                }
                 
                 break;
             }
             case CycleRole.verifying: {
                 if(pendingChildID != -1) {
                     return;
+                }
+                if(VERBOSE) {
+                     log("Sending Message...");
                 }
                 LatticeEdge targetEdge = inferNextEdge();
 
@@ -216,6 +258,9 @@ public class CyclebuilderComms extends CommunicationSystem {
                     child.enqueueMessage(vm);
                     pendingChildID = child.getRobotId();
                 }
+                if(VERBOSE) {
+                    log("Message sent!");
+                }
                 break;
             }
             case CycleRole.cycleBuilder: {
@@ -223,7 +268,11 @@ public class CyclebuilderComms extends CommunicationSystem {
                     return;
                 }        
                 if(!alreadyInPosition) {
+                    log("Not in the position to broadcast...");
                     break;
+                }
+                if(VERBOSE) {
+                     log("Sending Message...");
                 }
 
                 LatticeEdge targetEdge = inferNextEdge();
@@ -245,6 +294,9 @@ public class CyclebuilderComms extends CommunicationSystem {
                 child.enqueueMessage(pm);
                 self.addEdge(new Edge(self.getRobotId(), child.getRobotId()));
                 pendingChildID = child.getRobotId();
+                if(VERBOSE) {
+                    log("Message sent!");
+                }
                 break;
             }
             default:
@@ -260,13 +312,8 @@ public class CyclebuilderComms extends CommunicationSystem {
         
         for(LatticeEdge edge : edges) {
             GeometricCycleLatticeRobot neighbor = findBestNeighborForEdge(edge);
-            neighbor.enqueueMessage(new PromotionMessage(self.getRobotId(), neighbor.getRobotId()));
+            neighbor.enqueueMessage(new PromotionMessage(self.getRobotId(), neighbor.getRobotId(), edge));
         }
-    }
-
-    private void promoteSelfToStable() {
-        role = CycleRole.stable;
-        //Add more stuff as needed
     }
 
     private void initializeEdgeMap() {
@@ -289,7 +336,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     private GeometricCycleLatticeRobot findBestNeighborForEdge(LatticeEdge targetEdge) {
         makeObservations();
         OrientedPoint targetLocal  = getTargetInLocalCoordinates(targetEdge);
-
+            log("Beginning decision process");
         // Recover global coordinates for logging — apply self's local-to-global transform
         RigidBodyTransformation localToGlobal = new RigidBodyTransformation(self.getPosition());
         OrientedPoint targetGlobal = localToGlobal.apply(targetLocal);
@@ -370,10 +417,10 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     private void log(String msg) {
-    if (VERBOSE) {
-        System.out.println("[Robot " + self.getRobotId() + " | " + role + "] " + msg);
+        if (VERBOSE) {
+            System.out.println("[Robot " + self.getRobotId() + " | " + role + "] " + msg);
+        }
     }
-}
 
     private void forwardPositiveVerificationUpstream() {
         GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
@@ -394,6 +441,14 @@ public class CyclebuilderComms extends CommunicationSystem {
         StatusMessage sm = new StatusMessage(self.getRobotId(), parent.getRobotId(), true, originEdge);
         parent.enqueueMessage(sm);
         reset();
+    }
+
+    private void forwardSuccessUpstream(int parentId, LatticeEdge sentEdge) {
+        GeometricCycleLatticeRobot parent = getNeighborByID(parentId);
+        StatusMessage sm = new StatusMessage(self.getRobotId(), parentId, true, sentEdge);
+        parent.enqueueMessage(sm);
+        // Root/stable stays in role but must free the pending lock
+        this.pendingChildID = -1;
     }
 
     private void forwardFailureUpstream() {
@@ -450,6 +505,13 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     }
 
+    private void promoteSelfToStable() {
+        role = CycleRole.stable;
+        this.pendingChildID = -1;
+
+        //Add more stuff as needed
+    }
+
     //ACCESSORS ----------------------------------------------------
     public CycleRole   getRole()         { return role; }
     public boolean     isRoot()          { return role == CycleRole.root; }
@@ -476,12 +538,9 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     public void reset() {
-        this.stableID = -1;
         this.pendingChildID = -1;
         this.chainMemberList = new ChainMemberList();
-        this.isPrimaryRoot = false;
         this.role = CycleRole.unassigned;
-        this.completedCycles = new HashMap<>();
         this.originEdge = new LatticeEdge();
         this.assignedEdge = new LatticeEdge();
         this.observations = new HashMap<>();
