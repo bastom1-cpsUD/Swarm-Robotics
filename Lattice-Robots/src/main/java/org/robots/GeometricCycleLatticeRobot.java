@@ -16,6 +16,7 @@ import org.graphs.OrientedPoint;
 import org.motionModels.LatticeMotionModel;
 import org.motionModels.TimeStepDiffDrive;
 import org.simulation.Edge;
+import org.utils.MathUtils;
 
 /**
  * Robot participating in geometric cycle-building lattice formation.
@@ -26,7 +27,6 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // Constants
     // ------------------------------------------------------------
     public static final double COMM_RANGE = 75.0;
-    private static final double AT_POSITION_THRESHOLD = 1e-3;
 
     // ------------------------------------------------------------
     // Fields
@@ -125,22 +125,21 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
 
                 // 2. Ask comms system for current target
                 OrientedPoint target = commsSystem.getAssignedGlobalPosition();
-
-                if (target != null) {
-                    double dist = pose.distance(target);
-                    if (dist > AT_POSITION_THRESHOLD) {
-                        assignedPosition = target;
-                    } else {
-                        assignedPosition.x = pose.x;
-                        assignedPosition.y = pose.y;
-                    }
-                }
-
                 // 3. Broadcast logic (NEW API)
                 boolean atPos = (target != null
-                        && pose.distance(target) < AT_POSITION_THRESHOLD)
-                        && Double.compare(pose.orientation, target.orientation) == 0;
+                        && pose.distance(target) < MathUtils.EPSILON)
+                        && MathUtils.anglesEqual(pose.orientation, target.orientation);
                 
+                if (atPos) {
+                    // Arrived on position AND heading: hold our exact pose. This makes us a static
+                    // reference, instead of a parent whose residual rotation keeps sweeping the
+                    // children's targets and driving the rotate-to-point jitter.
+                    assignedPosition = new OrientedPoint(pose);
+                } else if (target != null) {
+                    assignedPosition = new OrientedPoint(target);
+                }
+
+
                 commsSystem.makeObservations();
 
                 commsSystem.broadcastMessage(atPos);

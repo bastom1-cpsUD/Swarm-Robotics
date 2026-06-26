@@ -36,6 +36,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     private LatticeEdge originEdge;
     private LatticeEdge assignedEdge;
     private ChainMemberList chainMemberList;
+    private boolean hasBeenAssigned;
     private GeometricCycleLatticeRobot self;
     private HashMap<Integer, Observation> observations;
 
@@ -80,10 +81,6 @@ public class CyclebuilderComms extends CommunicationSystem {
             return;
         } 
 
-        if(self.getRobotId() == 37 && role == CycleRole.stable) {
-            log("I have " + incomingMessages.size() + " to handle");
-        } 
-
         AbstractMessage peek = incomingMessages.peek();
         // Root/stable must always accept a closing PositioningMessage — don't gate on pendingChildID
         boolean bypassPendingGate = (role == CycleRole.root || role == CycleRole.stable)
@@ -96,6 +93,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                 log("Cannot bypass pending gate");
             }
         }
+
         if (!bypassPendingGate && pendingChildID != -1 && peek.getSenderId() != pendingChildID) {
             incomingMessages.add(incomingMessages.poll());
             return;
@@ -205,6 +203,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                 if (targetEdge == null) {
                     promoteAdjacentVerticesToRoots();
                     promoteSelfToStable();
+                    return;
                 }
                 /** 
                 // 1. Try to verify: Is there a neighbor at the edge's target position?
@@ -222,7 +221,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                     ChainMemberList chainList = new ChainMemberList(self.getRobotId());
                     if (childToBuild != null) {
                         PositioningMessage pm = new PositioningMessage(self.getRobotId(), childToBuild.getRobotId(), targetEdge, targetEdge,chainList);
-                        log("enqueuing message to robot " + childToBuild.getRobotId());
+                        log("Enqueuing message to robot " + childToBuild.getRobotId());
                         childToBuild.enqueueMessage(pm);
                         self.addEdge(new Edge(self.getRobotId(), childToBuild.getRobotId()));
                         pendingChildID = childToBuild.getRobotId(); // Wait for status
@@ -268,7 +267,6 @@ public class CyclebuilderComms extends CommunicationSystem {
                     return;
                 }        
                 if(!alreadyInPosition) {
-                    log("Not in the position to broadcast...");
                     break;
                 }
                 if(VERBOSE) {
@@ -339,20 +337,13 @@ public class CyclebuilderComms extends CommunicationSystem {
             log("Beginning decision process");
         // Recover global coordinates for logging — apply self's local-to-global transform
         RigidBodyTransformation localToGlobal = new RigidBodyTransformation(self.getPosition());
-        OrientedPoint targetGlobal = localToGlobal.apply(targetLocal);
-
+    
         ArrayList<Observation> validObservations = new ArrayList<>();
         int rootID = chainMemberList.isEmpty() ? -1 : chainMemberList.getRootID();
         for (Observation obs : observations.values()) {
             int robotID = obs.getId();
             if (robotID == rootID || !chainMemberList.isInList(robotID)) {
                 validObservations.add(obs);
-                OrientedPoint candidateGlobal = localToGlobal.apply(obs.getLocalPosition());
-                log("Included robot " + robotID + " in consideration"
-                        + " — global pos: (" + String.format("%.1f", candidateGlobal.x)
-                        + ", " + String.format("%.1f", candidateGlobal.y) + ")");
-            } else {
-                log("Discarded robot " + robotID + " from consideration (already in chain)");
             }
         }
 
@@ -360,35 +351,11 @@ public class CyclebuilderComms extends CommunicationSystem {
         double smallestDistance = Double.MAX_VALUE;
         for (Observation obs : validObservations) {
             double distance = targetLocal.distance(obs.getLocalPosition());
-            OrientedPoint candidateGlobal = localToGlobal.apply(obs.getLocalPosition());
             if (distance < smallestDistance) {
-                if (bestNeighborID != -1) {
-                    log("Robot " + bestNeighborID + " displaced by robot " + obs.getId()
-                            + " — robot " + obs.getId()
-                            + " global pos: (" + String.format("%.1f", candidateGlobal.x)
-                            + ", " + String.format("%.1f", candidateGlobal.y) + ")"
-                            + ", distance to target: " + String.format("%.2f", distance)
-                            + " < " + String.format("%.2f", smallestDistance));
-                }
+                
                 smallestDistance = distance;
                 bestNeighborID = obs.getId();
-                log("New best candidate: robot " + obs.getId()
-                        + " — global pos: (" + String.format("%.1f", candidateGlobal.x)
-                        + ", " + String.format("%.1f", candidateGlobal.y) + ")"
-                        + ", distance to target global pos ("
-                        + String.format("%.1f", targetGlobal.x) + ", "
-                        + String.format("%.1f", targetGlobal.y) + "): "
-                        + String.format("%.2f", distance));
-            } else {
-                log("Candidate robot " + obs.getId() + " denied"
-                        + " — global pos: (" + String.format("%.1f", candidateGlobal.x)
-                        + ", " + String.format("%.1f", candidateGlobal.y) + ")"
-                        + ", distance to target global pos ("
-                        + String.format("%.1f", targetGlobal.x) + ", "
-                        + String.format("%.1f", targetGlobal.y) + "): "
-                        + String.format("%.2f", distance)
-                        + " (current best: robot " + bestNeighborID
-                        + " at " + String.format("%.2f", smallestDistance) + ")");
+                
             }
         }
 

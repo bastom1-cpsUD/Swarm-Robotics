@@ -24,9 +24,4 @@ public interface LatticeMotionModel {
      */
     boolean moveTo(OrientedPoint currentPose, OrientedPoint newPose, double dt);
     
-    /**
-     * Provides the threshold distance for a robot to change its assigned position, which is used to prevent unnecessary movement due to small changes in assignment.
-     * @return the threshold distance for assignment changes
-     */
-    double getAssignmentChangeThreshold();
 }

@@ -339,6 +339,9 @@ public class AsyncRobotPanel extends JPanel {
             }
             tickCounts.replaceAll((id, v) -> 0L);
             lastActivatedMs.replaceAll((id, v) -> -1L);
+        } catch (Throwable t) {
+            System.out.println("Error with a robot");
+            t.printStackTrace();
         } finally { lock.writeLock().unlock(); }
         SwingUtilities.invokeLater(() -> playPauseBtn.setText("▶  Start"));
     }
