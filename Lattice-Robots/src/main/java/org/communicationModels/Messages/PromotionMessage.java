@@ -3,11 +3,13 @@ package org.communicationModels.Messages;
 import org.graphs.LatticeEdge;
 
 public class PromotionMessage extends AbstractMessage {
-    
-    private LatticeEdge currentEdge;
-    public PromotionMessage(int senderId, int recipient, LatticeEdge currentEdge) {
+    private int assignedVertexID;
+    private int assignedOutgoingEdgeID;
+
+    public PromotionMessage(int senderId, int recipient, int assignedVertexID, int assignedOutgoingEdgeID) {
         super(senderId, recipient);
-        this.currentEdge = currentEdge;
+        this.assignedVertexID = assignedVertexID;
+        this.assignedOutgoingEdgeID = assignedOutgoingEdgeID;
     }
 
     /**{@inheritDoc}*/
@@ -19,8 +21,12 @@ public class PromotionMessage extends AbstractMessage {
         return 4;
     }
 
-    public LatticeEdge getCurrentEdge() {
-        return currentEdge;
+    public int getAssignedVertexID() {
+        return assignedVertexID;
+    }
+
+    public int getAssignedOutgoingEdgeID() {
+        return assignedOutgoingEdgeID;
     }
 
     /**
@@ -29,7 +35,8 @@ public class PromotionMessage extends AbstractMessage {
      */
     private String getMessageInfo() {
         return super.messageInfo() + "\n"
-        + "Lattice Edge: " + this.currentEdge;
+        + "Assigned Vertex ID: " + this.assignedVertexID + "\n"
+        + "Assigned Edge ID: " + this.assignedOutgoingEdgeID;
     }
     
     @Override
@@ -50,12 +57,13 @@ public class PromotionMessage extends AbstractMessage {
         }
         PromotionMessage other = (PromotionMessage) o;
 
-        return this.getCurrentEdge().equals(other.getCurrentEdge());
+        return this.assignedVertexID == other.getAssignedVertexID()
+                && this.assignedOutgoingEdgeID == other.getAssignedOutgoingEdgeID();
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(super.hashCode(), currentEdge);
+        return java.util.Objects.hash(super.hashCode(), assignedVertexID, assignedOutgoingEdgeID);
     }
 
 }

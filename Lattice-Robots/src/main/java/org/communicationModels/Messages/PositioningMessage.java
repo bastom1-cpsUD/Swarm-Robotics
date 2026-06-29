@@ -1,22 +1,16 @@
 package org.communicationModels.Messages;
 
-import java.util.ArrayList;
-
-import org.graphs.LatticeEdge;
-
 public class PositioningMessage extends AbstractMessage {
-    /**
-     * The lattice edge that this positioning messages assigns to the recipient
-     */
-    private LatticeEdge currentEdge;
-    /**
-     * The ID of the root whose cycle is being built
-     */
-    private int rootId;
-    
     private ChainMemberList chainList;
 
-    private LatticeEdge originEdge;
+    private int assignedVertexID;
+    private int assignedOutgoingEdgeID;
+
+    private int originVertexID;
+    private int originOutgoingEdgeID;
+
+
+
     /**
      * Constructor for a positioning message
      * @param senderId the ID of the sender
@@ -24,24 +18,21 @@ public class PositioningMessage extends AbstractMessage {
      * @param currentEdge the edge being assigned to the recipient
      * @param rootId the ID of the root whose cycle is being built
      */
-    public PositioningMessage(int senderId, int recipient, LatticeEdge currentEdge, LatticeEdge originEdge, ChainMemberList chainList) {
+    public PositioningMessage(int senderId, int recipient, int assignedVertexID, int assignedOutgoingEdgeID, int originVertexID, int originOutgoingEdgeID, ChainMemberList chainList) {
         super(senderId, recipient);
-        this.currentEdge = currentEdge;
-        this.originEdge = originEdge;
         this.chainList = chainList;
+
+        this.assignedVertexID = assignedVertexID;
+        this.assignedOutgoingEdgeID = assignedOutgoingEdgeID;
+
+        this.originVertexID = originVertexID;
+        this.originOutgoingEdgeID = originOutgoingEdgeID;
+
     }
 
     /**{@inheritDoc} */
     public String getMessageType() {
         return "Assignment";
-    }
-
-    /**
-     * Retrieves the root ID for the cycle
-     * @return the root ID
-     */
-    public int getRootId() {
-        return rootId;
     }
 
     /**
@@ -52,16 +43,20 @@ public class PositioningMessage extends AbstractMessage {
         return chainList;
     }
 
-    /**
-     * Retrieves the lattice edge assigned to the recipient
-     * @return the lattice edge assigned
-     */
-    public LatticeEdge getCurrentEdge() {
-        return currentEdge;
+    public int getAssignedVertexID() {
+        return assignedVertexID;
     }
 
-    public LatticeEdge getOriginEdge() {
-        return originEdge;
+    public int getAssignedOutgoingEdgeID() {
+        return assignedOutgoingEdgeID;
+    }
+
+    public int getOriginVertexID() {
+        return originVertexID;
+    }
+
+    public int getOriginOutgoingEdgeID() {
+        return originOutgoingEdgeID;
     }
 
     public int getPriority() {
@@ -75,8 +70,10 @@ public class PositioningMessage extends AbstractMessage {
     private String getMessageInfo() {
         return super.messageInfo() + "\n"
         + "Root ID: " + this.chainList.getRootID() + "\n" 
-        + "Lattice Edge: " + this.currentEdge + "\n"
-        + "Beginning Edge of Cycle: " + this.originEdge;
+        + "Assigned Vertex ID: " + this.assignedVertexID + "\n"
+        + "Assigned Edge ID: " + this.assignedOutgoingEdgeID + "\n"        
+        + "Beginning Edge of Cycle Vertex ID: " + this.originVertexID + "\n"
+        + "Beginning Edge of Cycle Edge ID: " + this.originOutgoingEdgeID;
     }
 
     @Override
@@ -97,14 +94,15 @@ public class PositioningMessage extends AbstractMessage {
         }
         PositioningMessage other = (PositioningMessage) o;
 
-        return this.getRootId() == other.getRootId()
-            && this.getCurrentEdge().equals(other.getCurrentEdge())
-            && this.originEdge.equals(other.getOriginEdge())
+        return assignedVertexID == other.getAssignedVertexID()
+            && assignedOutgoingEdgeID == other.getAssignedOutgoingEdgeID()
+            && originVertexID == other.getOriginVertexID()
+            && originOutgoingEdgeID == other.getOriginOutgoingEdgeID()
             && this.chainList.equals(other.chainList);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(super.hashCode(), currentEdge, rootId, originEdge, chainList);
+        return java.util.Objects.hash(super.hashCode(), assignedVertexID, assignedOutgoingEdgeID, originVertexID, originOutgoingEdgeID, chainList);
     }
 }

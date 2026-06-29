@@ -3,6 +3,7 @@ package org.simulation.AsynchSim;
 import org.communicationModels.CycleRole;
 import org.graphs.OrientedPoint;
 import org.robots.GeometricCycleLatticeRobot;
+import org.utils.RobotDataIO;
 
 import javax.swing.*;
 import javax.swing.Timer;
@@ -57,7 +58,6 @@ public class AsyncRobotPanel extends JPanel {
     static {
         ROLE_COLORS.put(CycleRole.root,        new Color(0xFF6B35));
         ROLE_COLORS.put(CycleRole.cycleBuilder, new Color(0x4A90E2));
-        ROLE_COLORS.put(CycleRole.verifying,   new Color(0xF5A623));
         ROLE_COLORS.put(CycleRole.stable,      new Color(0x7ED321));
         ROLE_COLORS.put(CycleRole.unassigned,  new Color(0xBDBDBD));
     }

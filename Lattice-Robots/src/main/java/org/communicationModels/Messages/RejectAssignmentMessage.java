@@ -1,19 +1,13 @@
 package org.communicationModels.Messages;
 
-public class StatusMessage extends AbstractMessage {
-    private boolean isSuccessful;
+public class RejectAssignmentMessage extends AbstractMessage{
     private int originVertexID;
     private int originOutgoingEdgeID;
 
-    public StatusMessage(int senderId, int recipient, boolean isSuccessful, int originVertexID, int originOutgoingEdgeID) {
+    public RejectAssignmentMessage(int senderId, int recipient, int originVertexID, int originOutgoingEdgeID) {
         super(senderId, recipient);
-        this.isSuccessful = isSuccessful;
         this.originVertexID = originVertexID;
         this.originOutgoingEdgeID = originOutgoingEdgeID;
-    }
-
-    public boolean isSuccessful() {
-        return isSuccessful;
     }
 
     public int getOriginVertexID() {
@@ -26,7 +20,7 @@ public class StatusMessage extends AbstractMessage {
 
     /**{@inheritDoc}*/
     public String getMessageType() {
-        return "Status";
+        return "Rejection";
     }
 
     public int getPriority() {
@@ -36,7 +30,6 @@ public class StatusMessage extends AbstractMessage {
     @Override
     public String toString() {
         return super.toString() + "\n"
-            + "Status: " + (isSuccessful ? "Success" : "Failure") + "\n"
             + "Beginning Edge of Cycle Vertex ID: " + originVertexID + " \n"
             + "Beginning Edge of Cycle Edge ID: " + originOutgoingEdgeID;
     
@@ -50,19 +43,18 @@ public class StatusMessage extends AbstractMessage {
         if(!super.equals(o)) {
             return false;
         }
-        if(!(o instanceof StatusMessage)) {
+        if(!(o instanceof RejectAssignmentMessage)) {
             return false;
         }
 
-        StatusMessage other = (StatusMessage) o;
+        RejectAssignmentMessage other = (RejectAssignmentMessage) o;
 
-        return this.isSuccessful() == other.isSuccessful()
-            && originVertexID == other.getOriginVertexID()
+        return originVertexID == other.getOriginVertexID()
             && originOutgoingEdgeID == other.getOriginOutgoingEdgeID();
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(super.hashCode(), isSuccessful, originVertexID, originOutgoingEdgeID);
+        return java.util.Objects.hash(super.hashCode(), originVertexID, originOutgoingEdgeID);
     }
 }

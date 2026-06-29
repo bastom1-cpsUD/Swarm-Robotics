@@ -2,7 +2,7 @@ package org.robots;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.function.DoubleBinaryOperator;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.communicationModels.Communicatable;
 import org.communicationModels.CycleRole;
@@ -34,7 +34,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     private final CyclebuilderComms commsSystem;
     private final LatticeMotionModel latticeMotionModel;
 
-    private ArrayList<Edge> edges;
+    private CopyOnWriteArrayList<Edge> edges;
     private ArrayList<GeometricCycleLatticeRobot> neighbors;
 
     private OrientedPoint assignedPosition;
@@ -55,7 +55,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
         // NEW comms system (no graph passed in anymore)
         this.commsSystem = new CyclebuilderComms(this);
 
-        this.edges = new ArrayList<>();
+        this.edges = new CopyOnWriteArrayList<>();
         this.neighbors = new ArrayList<>();
 
         this.inCongestedArea = false;
@@ -87,7 +87,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // ------------------------------------------------------------
     public void addEdge(Edge e) { edges.add(e); }
     public void clearEdges() { edges.clear(); }
-    public ArrayList<Edge> getEdges() { return edges; }
+    public CopyOnWriteArrayList<Edge> getEdges() { return edges; }
 
     // ------------------------------------------------------------
     // Messaging interface

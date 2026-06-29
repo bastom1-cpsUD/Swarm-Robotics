@@ -1,5 +1,6 @@
 package org.graphs;
 
+import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.stream.Collectors;
@@ -32,6 +33,27 @@ public abstract class LatticeGraph {
      */
     public Vertex getPrimaryVertex() {
         return (Vertex) edges.keySet().toArray()[0]; // Assuming the first vertex is the primary vertex
+    }
+
+    public Vertex getVertexByID(int id) {
+        ArrayList<Vertex> vertices = getVertices();
+        for(Vertex v : vertices) {
+            if(v.getId() == id) {
+                return v;
+            }
+        }
+
+        return null;
+    }
+
+    public LatticeEdge getOutgoingEdgeByID(int vertexID, int edgeID) {
+        ArrayList<LatticeEdge> outgoingEdges = edges.get(getVertexByID(vertexID));
+        for(LatticeEdge e : outgoingEdges) {
+            if(e.getId() == edgeID) {
+                return e;
+            }
+        }
+        return null;
     }
 
     abstract int getNumberOfVertices();

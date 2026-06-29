@@ -10,50 +10,56 @@ import org.communicationModels.Messages.ChainMemberList;
 import org.communicationModels.Messages.PositioningMessage;
 import org.communicationModels.Messages.PromotionMessage;
 import org.communicationModels.Messages.StatusMessage;
-import org.communicationModels.Messages.VerificationMessage;
-import org.communicationModels.Messages.VerificationResponseMessage;
 import org.graphs.HexagonLattice;
 import org.graphs.LatticeEdge;
 import org.graphs.LatticeGraph;
 import org.graphs.OrientedPoint;
 import org.graphs.RigidBodyTransformation;
+import org.graphs.SquareLattice;
 import org.graphs.Vertex;
 import org.robots.GeometricCycleLatticeRobot;
 import org.simulation.Edge;
 
 public class CyclebuilderComms extends CommunicationSystem {
     private TrustLevel trust;
-    private int stableID;
-    private int pendingChildID;
     
     private static final boolean VERBOSE = true;
-    private HashMap<LatticeEdge, Boolean> completedCycles;
+    private HashMap<Integer, Boolean> completedCycles;
     private static final LatticeGraph graph = new HexagonLattice();
 
-    private boolean isPrimaryRoot;
-
-    private CycleRole role;
-    private LatticeEdge originEdge;
-    private LatticeEdge assignedEdge;
-    private ChainMemberList chainMemberList;
+    // State-Data
+    private int stableID;
+    private int pendingChildID;
     private boolean hasBeenAssigned;
+    private ChainMemberList chainMemberList;
     private GeometricCycleLatticeRobot self;
+    private CycleRole role;
+
+    private int assignedVertexID;
+    private int assignedOutgoingEdgeID;
+    private int originVertexID;
+    private int originOutgoingEdgeID;
+
+    // Time-Step Data
     private HashMap<Integer, Observation> observations;
 
 
+    //MAIN ALGORITHM STEPS
     public CyclebuilderComms(GeometricCycleLatticeRobot self) {
         this.trust = TrustLevel.Friendly;
         this.stableID = -1;
         this.pendingChildID = -1;
         this.chainMemberList = new ChainMemberList();
-        this.isPrimaryRoot = false;
         this.role = CycleRole.unassigned;
         this.completedCycles = new HashMap<>();
-        this.originEdge = new LatticeEdge();
-        this.assignedEdge = new LatticeEdge();
         this.self = self;
         this.observations = new HashMap<>();
         this.incomingMessages = new ConcurrentLinkedQueue<>();
+
+        assignedVertexID = -1;
+        assignedOutgoingEdgeID = -1;
+        originVertexID = -1;
+        originOutgoingEdgeID = -1;
     }
 
     public void makeObservations() {
@@ -105,39 +111,22 @@ public class CyclebuilderComms extends CommunicationSystem {
             case CycleRole.unassigned:
                 if(next instanceof PositioningMessage pm) {
                     role = CycleRole.cycleBuilder;
-                    assignedEdge = pm.getCurrentEdge();
-                    originEdge = pm.getOriginEdge();
+                    setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
+                    setOriginEdge(pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
                     chainMemberList = pm.getChainList();
                     self.addEdge(new Edge(self.getRobotId(), chainMemberList.getSenderID()));
-                    log("-> became cycleBuilder: edge id=" + assignedEdge.getId()
-                            + " from vertex " + assignedEdge.getFrom().getId()
+                    log("-> became cycleBuilder: edge id=" + getAssignedEdge().getId()
+                            + " from vertex " + getAssignedEdge().getFrom().getId()
                             + ", root=" + chainMemberList.getRootID()
                             + ", chain=" + chainMemberList.getIDList());
-                } else if(next instanceof VerificationMessage vm) {
-                    role = CycleRole.verifying;
-                    assignedEdge = vm.getCurrentEdge();
-                    originEdge =  vm.getCycleOrigin();
-                    chainMemberList = vm.getChainList();
-                    log("-> became verifying: edge id=" + assignedEdge.getId());
                 } else if(next instanceof PromotionMessage pm) {
                     
                     reset();
                     role = CycleRole.root;
                     stableID = pm.getSenderId();
-                    this.assignedEdge = pm.getCurrentEdge();
+                    setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
                     initializeEdgeMap();
                     log("-> promoted to root by robot " + stableID);
-                }
-                break;
-            case CycleRole.verifying:
-                if(next instanceof VerificationResponseMessage vrm && vrm.isSuccessful()) {
-                    pendingChildID = -1;
-                    log("-> downstream verification succeeded, forwarding positive upstream");
-                    forwardPositiveVerificationUpstream();
-                } else if(next instanceof VerificationResponseMessage vrm && !vrm.isSuccessful()) {
-                    pendingChildID = -1;
-                    log("-> downstream verification failed, forwarding negative upstream");
-                    forwardNegativeVerificationUpstream();
                 }
                 break;
             case cycleBuilder:
@@ -154,27 +143,21 @@ public class CyclebuilderComms extends CommunicationSystem {
             case CycleRole.root:
                 if(next instanceof StatusMessage sm) {
                     if (sm.isSuccessful()) {
-                    completedCycles.put(sm.getCycleOrigin(), true);
-                    log("-> cycle on edge " + sm.getCycleOrigin().getId() + " COMPLETED");
+                    completedCycles.put(sm.getOriginOutgoingEdgeID(), true);
+                    log("-> cycle on edge " + sm.getOriginOutgoingEdgeID() + " COMPLETED");
                     } else {
-                    log("-> cycle on edge " + sm.getCycleOrigin().getId() + " failed, will retry");
+                    log("-> cycle on edge " + sm.getOriginOutgoingEdgeID()+ " failed, will retry");
                     }
                     pendingChildID = -1;
-                } else if(next instanceof VerificationResponseMessage vrm) {
-                    if(vrm.isSuccessful()) {
-                        completedCycles.put(vrm.getCycleOrigin(), true);
-                        log("-> verification confirmed cycle on edge " + vrm.getCycleOrigin().getId());
-                    }
-                    pendingChildID = -1; 
                 } else if(next instanceof PositioningMessage pm) {
                     log("-> reached root, reporting SUCCESS, forwarding upstream");
-                    forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginEdge());
+                    forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
                 }
                 break;
             case CycleRole.stable:
                 if(next instanceof PositioningMessage pm) {
                     log("-> reached stable, reporting SUCCESS, forwarding upstream");
-                    forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginEdge());
+                    forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
                 }
             break;
         }
@@ -182,7 +165,6 @@ public class CyclebuilderComms extends CommunicationSystem {
     
 
     public void broadcastMessage(boolean alreadyInPosition) {
-       
         switch (role) {
             case CycleRole.root: {
                 if(pendingChildID != -1) {
@@ -192,74 +174,36 @@ public class CyclebuilderComms extends CommunicationSystem {
                      log("Sending Message...");
                 }
                 // Find the first outgoing edge that doesn't have a completed cycle yet
-                LatticeEdge targetEdge = null;
-                for (Entry<LatticeEdge, Boolean> entry : completedCycles.entrySet()) {
+                int targetEdgeID = -1;
+                for (Entry<Integer, Boolean> entry : completedCycles.entrySet()) {
                     if (!entry.getValue()) {
-                        targetEdge = entry.getKey();
+                        targetEdgeID = entry.getKey();
                         break;
                     }
                 }
                 
-                if (targetEdge == null) {
+                if (targetEdgeID == -1) {
                     promoteAdjacentVerticesToRoots();
                     promoteSelfToStable();
                     return;
                 }
-                /** 
-                // 1. Try to verify: Is there a neighbor at the edge's target position?
-                GeometricCycleLatticeRobot occupyingNeighbor = findNeighborAt(targetEdge.getToPos());
 
-                if (occupyingNeighbor != null) {
-                    // Send a VerificationMessage down the edge
-                    ChainMemberList chainList = new ChainMemberList(self.getRobotId());
-                    VerificationMessage vm = new VerificationMessage(self.getRobotId(), occupyingNeighbor.getRobotId(), targetEdge, targetEdge, chainList);
-                    occupyingNeighbor.enqueueMessage(vm);
-                    pendingChildID = occupyingNeighbor.getRobotId(); // Wait for response
-                } else { */
-                    // 2. Cycle does not exist. Build it!
-                    GeometricCycleLatticeRobot childToBuild = findBestNeighborForEdge(targetEdge);
-                    ChainMemberList chainList = new ChainMemberList(self.getRobotId());
-                    if (childToBuild != null) {
-                        PositioningMessage pm = new PositioningMessage(self.getRobotId(), childToBuild.getRobotId(), targetEdge, targetEdge,chainList);
-                        log("Enqueuing message to robot " + childToBuild.getRobotId());
-                        childToBuild.enqueueMessage(pm);
-                        self.addEdge(new Edge(self.getRobotId(), childToBuild.getRobotId()));
-                        pendingChildID = childToBuild.getRobotId(); // Wait for status
-                    }
-                    if(VERBOSE) {
+                LatticeEdge targetEdge = graph.getOutgoingEdgeByID(getCurrentVertex().getId(), targetEdgeID);
+
+                // 2. Cycle does not exist. Build it!
+                GeometricCycleLatticeRobot childToBuild = findBestNeighborForEdge(targetEdge);
+                ChainMemberList chainList = new ChainMemberList(self.getRobotId());
+                if (childToBuild != null) {
+                    PositioningMessage pm = new PositioningMessage(self.getRobotId(), childToBuild.getRobotId(), getVertexIDof(targetEdge), getEdgeIDof(targetEdge), getVertexIDof(targetEdge), getEdgeIDof(targetEdge), chainList);                        
+                    log("Enqueuing message to robot " + childToBuild.getRobotId());
+                    childToBuild.enqueueMessage(pm);
+                   self.addEdge(new Edge(self.getRobotId(), childToBuild.getRobotId()));
+                    pendingChildID = childToBuild.getRobotId(); // Wait for status
+                 }
+                if(VERBOSE) {
                     log("Message sent to " + childToBuild.getRobotId());
                 }
                 
-                break;
-            }
-            case CycleRole.verifying: {
-                if(pendingChildID != -1) {
-                    return;
-                }
-                if(VERBOSE) {
-                     log("Sending Message...");
-                }
-                LatticeEdge targetEdge = inferNextEdge();
-
-                OrientedPoint targetInLocalCoordinates = getTargetInLocalCoordinates(targetEdge);
-
-                GeometricCycleLatticeRobot child = findNeighborAt(targetInLocalCoordinates);
-
-                if(child == null) {
-                    forwardNegativeVerificationUpstream();
-                } else if(child.getRobotId() == chainMemberList.getRootID()) {
-                    //Send verification true
-                    forwardPositiveVerificationUpstream();
-                } else {
-                    //Send verification message
-                    ChainMemberList childChainList = new ChainMemberList(chainMemberList, self.getRobotId());
-                    VerificationMessage vm = new VerificationMessage(self.getRobotId(), child.getRobotId(), originEdge, targetEdge, childChainList);
-                    child.enqueueMessage(vm);
-                    pendingChildID = child.getRobotId();
-                }
-                if(VERBOSE) {
-                    log("Message sent!");
-                }
                 break;
             }
             case CycleRole.cycleBuilder: {
@@ -288,7 +232,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                 }
                 log("-> assigning robot " + child.getRobotId() + " to edge " + targetEdge.getId());
                 ChainMemberList childChainList = new ChainMemberList(chainMemberList, self.getRobotId());
-                PositioningMessage pm = new PositioningMessage(self.getRobotId(), child.getRobotId(), targetEdge, originEdge, childChainList);
+                PositioningMessage pm = new PositioningMessage(self.getRobotId(), child.getRobotId(), getVertexIDof(targetEdge), getEdgeIDof(targetEdge), originVertexID, originOutgoingEdgeID, childChainList);
                 child.enqueueMessage(pm);
                 self.addEdge(new Edge(self.getRobotId(), child.getRobotId()));
                 pendingChildID = child.getRobotId();
@@ -302,7 +246,37 @@ public class CyclebuilderComms extends CommunicationSystem {
         }
     }
 
-    
+    //MESSAGE-PROCESSING UTIL
+    private void forwardSuccessUpstream() {
+        GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
+        StatusMessage sm = new StatusMessage(self.getRobotId(), parent.getRobotId(), true, originVertexID, originOutgoingEdgeID);
+        parent.enqueueMessage(sm);
+        reset();
+    }
+
+    private void forwardSuccessUpstream(int parentId, int originVertexID, int originEdgeID) {
+        GeometricCycleLatticeRobot parent = getNeighborByID(parentId);
+        StatusMessage sm = new StatusMessage(self.getRobotId(), parentId, true, originVertexID, originEdgeID);
+        parent.enqueueMessage(sm);
+        // Root/stable stays in role but must free the pending lock
+        this.pendingChildID = -1;
+    }
+
+    private void forwardFailureUpstream() {
+        GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
+        StatusMessage sm = new StatusMessage(self.getRobotId(), parent.getRobotId(), false, originVertexID, originOutgoingEdgeID);
+        parent.enqueueMessage(sm);
+        reset();
+    }
+
+    //ROOT-RELATED UTIL
+    private void initializeEdgeMap() {
+        Vertex myVertex = getCurrentVertex();
+        ArrayList<LatticeEdge> edges = graph.getOutgoingEdges(myVertex);
+        for(LatticeEdge edge : edges) {
+            completedCycles.put(getEdgeIDof(edge), false);
+        }
+    }
 
     private void promoteAdjacentVerticesToRoots() {
         Vertex myVertex = getCurrentVertex();
@@ -310,17 +284,11 @@ public class CyclebuilderComms extends CommunicationSystem {
         
         for(LatticeEdge edge : edges) {
             GeometricCycleLatticeRobot neighbor = findBestNeighborForEdge(edge);
-            neighbor.enqueueMessage(new PromotionMessage(self.getRobotId(), neighbor.getRobotId(), edge));
+            neighbor.enqueueMessage(new PromotionMessage(self.getRobotId(), neighbor.getRobotId(), getVertexIDof(edge), getEdgeIDof(edge)));
         }
     }
 
-    private void initializeEdgeMap() {
-        Vertex myVertex = getCurrentVertex();
-        ArrayList<LatticeEdge> edges = graph.getOutgoingEdges(myVertex);
-        for(LatticeEdge edge : edges) {
-            completedCycles.put(edge, false);
-        }
-    }
+    //ASSIGNMENT-RELATED UTIL
 
     private GeometricCycleLatticeRobot getNeighborByID(int robotID) {
         for(GeometricCycleLatticeRobot neighbor : self.getNeighbors()) {
@@ -361,72 +329,17 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         return getNeighborByID(bestNeighborID);
     }
-    /**
-     * Helper method to find a neighbor currently sitting at the target local position.
-     */
-    private GeometricCycleLatticeRobot findNeighborAt(OrientedPoint targetPose) {
-        for (Observation obs : observations.values()) {
-            // Using equals() for exact matches. Note: If using continuous physics, 
-            // you may want to change this to calculate distance < epsilon.
-            if (obs.getLocalPosition().equals(targetPose)) {
-                for (GeometricCycleLatticeRobot neighbor : self.getNeighbors()) {
-                    if (neighbor.getRobotId() == obs.getId()) {
-                        return neighbor;
-                    }
-                }
-            }
-        }
-        return null;
-    }
 
     private OrientedPoint getTargetInLocalCoordinates(LatticeEdge edge) {
         return edge.getToPos();
     }
 
-    private void log(String msg) {
-        if (VERBOSE) {
-            System.out.println("[Robot " + self.getRobotId() + " | " + role + "] " + msg);
-        }
-    }
-
-    private void forwardPositiveVerificationUpstream() {
-        GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
-        VerificationResponseMessage vrm = new VerificationResponseMessage(self.getRobotId(), parent.getRobotId(), chainMemberList.getRootID(), originEdge, true);
-        parent.enqueueMessage(vrm);
-        reset();
-    }
-
-    private void forwardNegativeVerificationUpstream() {
-        GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
-        VerificationResponseMessage vrm = new VerificationResponseMessage(self.getRobotId(), parent.getRobotId(), chainMemberList.getRootID(), originEdge, false);
-        parent.enqueueMessage(vrm);
-        reset();
-    }
-
-    private void forwardSuccessUpstream() {
-        GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
-        StatusMessage sm = new StatusMessage(self.getRobotId(), parent.getRobotId(), true, originEdge);
-        parent.enqueueMessage(sm);
-        reset();
-    }
-
-    private void forwardSuccessUpstream(int parentId, LatticeEdge sentEdge) {
-        GeometricCycleLatticeRobot parent = getNeighborByID(parentId);
-        StatusMessage sm = new StatusMessage(self.getRobotId(), parentId, true, sentEdge);
-        parent.enqueueMessage(sm);
-        // Root/stable stays in role but must free the pending lock
-        this.pendingChildID = -1;
-    }
-
-    private void forwardFailureUpstream() {
-        GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
-        StatusMessage sm = new StatusMessage(self.getRobotId(), parent.getRobotId(), false, originEdge);
-        parent.enqueueMessage(sm);
-        reset();
-    }
-
-    public LatticeEdge inferNextEdge() {
-        if (assignedEdge == null || assignedEdge.isNull()) return null;
+    /**
+     * EDGE AND VERTEX UTIL
+     */
+    private LatticeEdge inferNextEdge() {
+        LatticeEdge assignedEdge = getAssignedEdge();
+        if (assignedEdge.isNull()) return null;
 
         Vertex currentVertex = getCurrentVertex();          // where this robot now sits
         Vertex incomingFromType = assignedEdge.getFrom();    // sublattice the assignment came from
@@ -452,21 +365,52 @@ public class CyclebuilderComms extends CommunicationSystem {
         return null;
     }
 
-    public Vertex getCurrentVertex() {
+    private Vertex getCurrentVertex() {
+        LatticeEdge assignedEdge = getAssignedEdge();
 
-        if(role != CycleRole.root) {
-            return assignedEdge.getTo();
-        }
-
-        if(isPrimaryRoot) {
+        if(assignedEdge.isNull()) {
             return graph.getPrimaryVertex();
         }
 
         return assignedEdge.getTo();
     }
 
+    private LatticeEdge getAssignedEdge() {
+        if(assignedVertexID == -1 || assignedOutgoingEdgeID == -1) {
+            return new LatticeEdge();
+        }
+        return graph.getOutgoingEdgeByID(assignedVertexID, assignedOutgoingEdgeID);
+    }
+
+    public LatticeEdge getOriginEdge() {
+        if(originVertexID == -1 || originOutgoingEdgeID == -1) {
+            return new LatticeEdge();
+        }
+
+        return graph.getOutgoingEdgeByID(originVertexID, originOutgoingEdgeID);
+    }
+
+    public void setAssignedEdge(int vertexID, int edgeID) {
+        assignedVertexID = vertexID;
+        assignedOutgoingEdgeID = edgeID;
+    }
+
+    public void setOriginEdge(int vertexID, int edgeID) {
+        originVertexID = vertexID;
+        originOutgoingEdgeID = edgeID;
+    }
+
+    public int getVertexIDof(LatticeEdge e) {
+        return e.getFrom().getId();
+    }
+
+    public int getEdgeIDof(LatticeEdge e) {
+        return e.getId();
+    }
+
+    //STATE CHANGE UTIL
+
     public void promoteToPriamaryRoot() {
-        isPrimaryRoot = true;
         role = CycleRole.root;
         initializeEdgeMap();
 
@@ -479,15 +423,13 @@ public class CyclebuilderComms extends CommunicationSystem {
         //Add more stuff as needed
     }
 
-    //ACCESSORS ----------------------------------------------------
+    //ACCESSORS, MUTATORS, AND UTIL ----------------------------------------------------
     public CycleRole   getRole()         { return role; }
     public boolean     isRoot()          { return role == CycleRole.root; }
     public boolean     isStable()        { return role == CycleRole.stable; }
     public boolean     isCycleBuilder()  { return role == CycleRole.cycleBuilder; }
     public boolean     isUnassigned()    { return role == CycleRole.unassigned; }
- 
-    public LatticeEdge getAssignedEdge() { return assignedEdge; }
- 
+
     public TrustLevel  getTrustLevel()             { return trust; }
     public void        setTrustLevel(TrustLevel t) { this.trust = t; }
 
@@ -495,6 +437,9 @@ public class CyclebuilderComms extends CommunicationSystem {
         if (role == CycleRole.root || role == CycleRole.stable) {
             return self.getPosition();
         }
+
+        LatticeEdge assignedEdge = getAssignedEdge();
+
         if (assignedEdge.isNull()) return null;
  
         GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
@@ -508,9 +453,19 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.pendingChildID = -1;
         this.chainMemberList = new ChainMemberList();
         this.role = CycleRole.unassigned;
-        this.originEdge = new LatticeEdge();
-        this.assignedEdge = new LatticeEdge();
         this.observations = new HashMap<>();
+
+        this.assignedVertexID = -1;
+        this.assignedOutgoingEdgeID = -1;
+
+        this.originVertexID = -1;
+        this.originOutgoingEdgeID = -1;
+    }
+
+    private void log(String msg) {
+        if (VERBOSE) {
+            System.out.println("[Robot " + self.getRobotId() + " | " + role + "] " + msg);
+        }
     }
     
 }
