@@ -2,6 +2,8 @@ package org.simulation.AsynchSim;
 
 import org.communicationModels.CycleRole;
 import org.graphs.OrientedPoint;
+import org.utils.logging.SimulationLogger;
+import org.utils.logging.TickRecord;
 import org.robots.GeometricCycleLatticeRobot;
 import org.utils.RobotDataIO;
 
@@ -81,6 +83,9 @@ public class AsyncRobotPanel extends JPanel {
     private volatile boolean simStarted  = false;
     private volatile long    periodMs    = DEFAULT_PERIOD_MS;
 
+    private final SimulationLogger simLogger = new SimulationLogger(false);
+    private int globalStepCount = 0;
+
     // ------------------------------------------------------------------
     // Telemetry — written by executor threads, read approx by EDT
     // Plain map is fine: stale reads of longs are acceptable for display
@@ -101,7 +106,6 @@ public class AsyncRobotPanel extends JPanel {
     // Control widgets
     private JButton playPauseBtn;
     private JLabel  speedLabel;
-
     // ------------------------------------------------------------------
     // Constructor
     // ------------------------------------------------------------------
@@ -114,6 +118,12 @@ public class AsyncRobotPanel extends JPanel {
         add(buildControlStrip(), BorderLayout.SOUTH);
 
         new Timer((int) RENDER_PERIOD_MS, e -> canvas.repaint()).start();
+
+        System.out.println("[Panel] HTML tick log: " + simLogger.directory().resolve("index.html"));
+    }
+
+    public void shutdown() {
+        simLogger.close();
     }
 
     // ------------------------------------------------------------------
@@ -244,6 +254,14 @@ public class AsyncRobotPanel extends JPanel {
         JButton statsBtn = darkButton("📊  Stats");
         statsBtn.addActionListener(e -> showStats = !showStats);
         strip.add(statsBtn);
+
+        JCheckBox logUnchangedBox = new JCheckBox("Log unchanged");
+        logUnchangedBox.setSelected(simLogger.isLoggingUnchangedRobots());
+        logUnchangedBox.setBackground(new Color(28, 28, 28));
+        logUnchangedBox.setForeground(new Color(180, 180, 180));
+        logUnchangedBox.setFocusPainted(false);
+       logUnchangedBox.addActionListener(e -> simLogger.setLogUnchangedRobots(logUnchangedBox.isSelected()));
+        strip.add(logUnchangedBox);
 
         strip.add(dimLabel("   [Space] play/pause  [→] step  [K] load  [J] save  [T] stats  [S] screenshot"));
         return strip;
@@ -411,13 +429,19 @@ public class AsyncRobotPanel extends JPanel {
     // ------------------------------------------------------------------
     private void tickRobot(int id) {
         if (!simRunning) return;
+        TickRecord rec = null;
         lock.readLock().lock();
         try {
             GeometricCycleLatticeRobot robot = robots.get(id);
             if (robot == null) return;
             double dt = periodMs / 1000.0;
-            robot.executeTimeStep(dt);
+            int tick = (int) (tickCounts.getOrDefault(id, 0L) + 1);
+            rec = robot.executeTimeStep(dt, tick);
+        } catch(Exception e) {
+            e.printStackTrace();
         } finally { lock.readLock().unlock(); }
+
+        if(rec != null) simLogger.record(rec);
 
         // Telemetry updated outside the lock — EDT reads are display-only
         tickCounts.put(id, tickCounts.getOrDefault(id, 0L) + 1);
@@ -434,11 +458,15 @@ public class AsyncRobotPanel extends JPanel {
         try {
             double dt = periodMs / 1000.0;
             for (Map.Entry<Integer, GeometricCycleLatticeRobot> e : robots.entrySet()) {
-                e.getValue().executeTimeStep(dt);
-                e.getValue().move(dt); // manual single move step for debug fidelity
+                int tick = (int) (tickCounts.getOrDefault(e.getKey(), 0L) + 1);
+                TickRecord rec = e.getValue().executeTimeStep(dt, tick);
+                e.getValue().move(dt);
+                simLogger.record(rec);
                 tickCounts.put(e.getKey(), tickCounts.getOrDefault(e.getKey(), 0L) + 1);
                 lastActivatedMs.put(e.getKey(), System.currentTimeMillis());
             }
+        } catch(Exception e) {
+            e.printStackTrace();
         } finally { lock.readLock().unlock(); }
     }
 
@@ -467,6 +495,7 @@ public class AsyncRobotPanel extends JPanel {
     private void render(Graphics2D g2) {
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+
 
         lock.readLock().lock();
         try {
@@ -505,6 +534,7 @@ public class AsyncRobotPanel extends JPanel {
         for (GeometricCycleLatticeRobot r : robots.values()) {
             g2.setColor(roleColor(r));
             Shape shape = r.draw();
+
             g2.fill(shape);
             if (r == selectedRobot) {
                 g2.setColor(Color.YELLOW);
@@ -643,7 +673,14 @@ public class AsyncRobotPanel extends JPanel {
             }
 
             JFrame frame = new JFrame("Async Lattice Robot Simulation");
-            frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+            frame.addWindowListener(new WindowAdapter() {
+                @Override public void windowClosing(WindowEvent e) {
+                    panel.shutdown();
+                    frame.dispose();
+                    System.exit(0);
+                }
+            });
             frame.setContentPane(panel);
             frame.pack();
             frame.setLocationRelativeTo(null);

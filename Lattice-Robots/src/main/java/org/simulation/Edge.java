@@ -8,7 +8,6 @@ import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
 
 import org.robots.GeometricCycleLatticeRobot;
-import org.robots.LatticeRobot;
 
 public class Edge {
     private int fromId;

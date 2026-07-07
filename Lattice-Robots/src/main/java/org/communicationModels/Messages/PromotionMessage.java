@@ -18,7 +18,7 @@ public class PromotionMessage extends AbstractMessage {
     }
 
     public int getPriority() {
-        return 4;
+        return 1;
     }
 
     public int getAssignedVertexID() {

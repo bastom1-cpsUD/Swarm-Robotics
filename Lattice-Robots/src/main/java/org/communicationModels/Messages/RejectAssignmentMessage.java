@@ -32,7 +32,6 @@ public class RejectAssignmentMessage extends AbstractMessage{
         return super.toString() + "\n"
             + "Beginning Edge of Cycle Vertex ID: " + originVertexID + " \n"
             + "Beginning Edge of Cycle Edge ID: " + originOutgoingEdgeID;
-    
     }
     
     @Override

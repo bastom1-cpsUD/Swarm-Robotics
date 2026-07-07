@@ -39,6 +39,10 @@ public class ChainMemberList {
         return chainList.isEmpty();
     }
 
+    public int size() {
+        return chainList.size();
+    }
+
     @Override
     public boolean equals(Object o) {
         if(this == o) {

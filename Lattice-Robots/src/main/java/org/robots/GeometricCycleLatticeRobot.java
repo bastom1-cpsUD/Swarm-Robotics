@@ -2,6 +2,7 @@ package org.robots;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.communicationModels.Communicatable;
@@ -13,6 +14,8 @@ import org.drawingModels.TriangularModel;
 import org.graphs.HexagonLattice;
 import org.graphs.LatticeGraph;
 import org.graphs.OrientedPoint;
+import org.utils.logging.CommsSnapshot;
+import org.utils.logging.TickRecord;
 import org.motionModels.LatticeMotionModel;
 import org.motionModels.TimeStepDiffDrive;
 import org.simulation.Edge;
@@ -105,31 +108,60 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // ------------------------------------------------------------
     // Main time-step
     // ------------------------------------------------------------
-    public void executeTimeStep(double dt) {
-        if (inCongestedArea) return;
+    /**
+     * Executes one activation of this robot's role-specific control logic
+     * and returns a full record of what happened — state immediately before,
+     * what message was processed, what action resulted, what was sent, and
+     * state immediately after. The role dispatch below intentionally stays
+     * here rather than in the simulation panel, since root/stable and
+     * cycleBuilder/unassigned activate their comms calls in different
+     * orders.
+     *
+     * @param dt   time step, in seconds, forwarded to downstream motion logic
+     * @param tick a logical tick number for this robot's own activation
+     *             timeline (e.g. the panel's per-robot tick counter, or a
+     *             global step counter during single-step debugging). Purely
+     *             informational — does not affect behavior.
+     * @return a record of everything that happened this activation, or a
+     *         "nothing happened" record if the robot is currently navigating
+     *         a congested area (comms are skipped entirely in that case).
+     */
+    public TickRecord executeTimeStep(double dt, int tick) {
+        CommsSnapshot before = commsSystem.snapshot();
+        OrientedPoint poseBefore = new OrientedPoint(pose);
+
+        if (inCongestedArea) {
+            return new TickRecord(tick, robotId, before, poseBefore,
+                    "N/A (in congested area)", "N/A (in congested area)",
+                    List.of(), before, poseBefore);
+        }
+
+        commsSystem.beginTick();
+        String processed;
+        String action;
 
         switch(getRole()) {
             case CycleRole.root -> {
                 commsSystem.makeObservations();
-                processMessages();
-                commsSystem.broadcastMessage(true);
+                processed = commsSystem.processMessages(tick);
+                action = commsSystem.broadcastMessage(true, tick);
             }
             case CycleRole.stable -> {
                 commsSystem.makeObservations();
-                processMessages();
-                commsSystem.broadcastMessage(true);
+                processed = commsSystem.processMessages(tick);
+                action = commsSystem.broadcastMessage(true, tick);
             }
             default -> {
-                // 1. Update observations + process incoming messages
-                processMessages();
+                // 1. Process incoming messages
+                processed = commsSystem.processMessages(tick);
 
                 // 2. Ask comms system for current target
                 OrientedPoint target = commsSystem.getAssignedGlobalPosition();
                 // 3. Broadcast logic (NEW API)
                 boolean atPos = (target != null
-                        && pose.distance(target) < MathUtils.EPSILON)
+                        && pose.distance(target) < MathUtils.POSITION_EPSILON)
                         && MathUtils.anglesEqual(pose.orientation, target.orientation);
-                
+
                 if (atPos) {
                     // Arrived on position AND heading: hold our exact pose. This makes us a static
                     // reference, instead of a parent whose residual rotation keeps sweeping the
@@ -139,14 +171,17 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
                     assignedPosition = new OrientedPoint(target);
                 }
 
-
                 commsSystem.makeObservations();
 
-                commsSystem.broadcastMessage(atPos);
+                action = commsSystem.broadcastMessage(atPos, tick);
             }
         }
 
-        
+        CommsSnapshot after = commsSystem.snapshot();
+        OrientedPoint poseAfter = new OrientedPoint(pose);
+
+        return new TickRecord(tick, robotId, before, poseBefore, processed, action,
+                commsSystem.sentThisTick(), after, poseAfter);
     }
 
     // ------------------------------------------------------------

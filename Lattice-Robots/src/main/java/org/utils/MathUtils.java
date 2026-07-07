@@ -20,6 +20,8 @@ public final class MathUtils {
      */
     public static final double EPSILON = 1e-3;
 
+    public static final double POSITION_EPSILON = 1e-1;
+
     private MathUtils() {
         // Utility class
     }
@@ -53,6 +55,10 @@ public final class MathUtils {
      */
     public static boolean approxEquals(double a, double b) {
         return isZero(a - b);
+    }
+
+    public static boolean approxEquals(double a, double b, double epsilon) {
+        return isZero(a - b, epsilon);
     }
 
     /**

@@ -1,0 +1,5 @@
+#ignore the debug logs and output images
+logs
+
+output/robot_panel_images
+
