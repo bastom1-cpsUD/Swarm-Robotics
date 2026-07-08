@@ -60,7 +60,7 @@ public class PositioningMessage extends AbstractMessage {
     }
 
     public int getPriority() {
-        return 3;
+        return 2;
     }
 
     /**

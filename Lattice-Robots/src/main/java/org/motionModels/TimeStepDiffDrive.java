@@ -156,8 +156,12 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
 
         double step = linearVelocity * dt;
 
-        if(step > distance) {
-            step = distance;
+        if(step >= distance) {
+            pose.x = newPose.x;
+            pose.y = newPose.y;
+            changeState(0, 0);
+            distTraveled = distTraveled + distance;
+            return true;
         }
 
         pose.x += step * Math.cos(pose.orientation);

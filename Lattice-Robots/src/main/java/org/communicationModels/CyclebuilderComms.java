@@ -86,10 +86,19 @@ public class CyclebuilderComms extends CommunicationSystem {
         }
 
         RigidBodyTransformation globalToLocal = new RigidBodyTransformation(self.getPosition()).inverse();
-
+        boolean childHasLeft = true;
         for(GeometricCycleLatticeRobot neighbor : neighbors) {
+            if(neighbor.getRobotId() == pendingChildID) {
+                childHasLeft = false;
+            }
             Observation obs = new Observation(neighbor, globalToLocal);
             observations.put(neighbor.getRobotId(), obs);
+        }
+
+        if(childHasLeft && pendingChildID != -1) {
+            log("-> child " + pendingChildID + " has left, clearing pendingChildID");
+            pendingChildID = -1;
+            self.getEdges().removeIf(edge -> edge.getToId() == pendingChildID);
         }
     }
 
@@ -116,7 +125,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         AbstractMessage peek = incomingMessages.peek();
         // Root/stable must always accept a closing PositioningMessage — don't gate on pendingChildID
         boolean bypassPendingGate = (role == CycleRole.root || role == CycleRole.stable)
-                && peek instanceof PositioningMessage;
+                && (peek instanceof PositioningMessage || peek instanceof StatusMessage || peek instanceof RejectAssignmentMessage);
 
         if (!bypassPendingGate && pendingChildID != -1 && peek.getSenderId() != pendingChildID) {
             incomingMessages.add(incomingMessages.poll());
@@ -132,7 +141,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                     if(hasBeenAssigned) {
                         log("Checking for formation-breaking assignment...");
                         if(!checkAssignmentForCurrentPosition(pm)) {
-                            forwardRejectionUpstream(pm);
+                            forwardRejectionUpstream(pm, false);
                             log("-> assignment REJECTED by " + pm.getSenderId());
                             return "Positioning Message from " + pm.getSenderId() + "(REJECTED)";
                         }
@@ -176,21 +185,62 @@ public class CyclebuilderComms extends CommunicationSystem {
                 } else if(next instanceof RejectAssignmentMessage rm) {
                     pendingChildID = -1;
                     log("-> assignment REJECTED by " + rm.getSenderId());
-                    unableToDoAssignmentIDs.add(rm.getSenderId());
-                    return "Reject Assignment Message from " + rm.getSenderId() + "(REJECTED)";
+                    if(rm.isRetryable()) {
+                        forwardRejectionToParent(true);
+                        reset();
+                        log("-> assignment is retryable, will attempt to reassign");
+                    } else {
+                        unableToDoAssignmentIDs.add(rm.getSenderId());
+                        log("-> assignment is NOT retryable, will not attempt to reassign");
+                    }
+                    return "Reject Assignment Message from " + rm.getSenderId() + "(REJECTED, " + (rm.isRetryable() ? "RETRYABLE)" : " NOT RETRYABLE)");
                 } else if(next instanceof PromotionMessage pm) {
-                    forwardSuccessUpstream();
-                    reset();
-                    role = CycleRole.root;
-                    stableID = pm.getSenderId();
-                    setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
-                    initializeEdgeMap();
-                    log("-> promoted to root by robot " + stableID);
-                    return "Promotion Message from " + pm.getSenderId() + "(ACCEPTED, re-promoted mid-build)";
+                    incomingMessages.add(pm);
+                    return "Promotion Message from " + pm.getSenderId() + "(DEFERRED - already cycleBuilder)";
                 } else if(next instanceof PositioningMessage pm) {
                     // If the sender is our pending child, we can accept the message and process it normally.
                     if(pm.getSenderId() == pendingChildID) {
-                        
+                        //Check if assignment is to current location
+                        if(!checkAssignmentForCurrentPosition(pm)) {
+                            forwardRejectionUpstream(pm, false);
+                            log("-> assignment REJECTED by " + pm.getSenderId() + "(WILL BREAK FORMATION)");
+                            return "Positioning Message from " + pm.getSenderId() + "(REJECTED)";
+                        }
+
+                        //Check chain list to see who's list is larger, and if the incoming message has a larger list, we should accept it and send rejection to current parent with retryable
+                        if(pm.getChainList().size() > chainMemberList.size()) {
+                            forwardRejectionToParent(true);
+                            pendingChildID = -1;
+                            setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
+                            setOriginEdge(pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
+                            unableToDoAssignmentIDs.clear();
+                            unableToDoAssignmentIDs.add(pm.getSenderId());
+                            chainMemberList = pm.getChainList();
+                            log("-> assignment REJECTED by " + pm.getSenderId() + " (incoming chain list is larger)");
+                            return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED, incoming chain list is larger)";
+
+                        //If incoming list is smaller, we should wait for other to complete our task as it will override
+                        } else if(pm.getChainList().size() < chainMemberList.size()) {
+                            //If a root sent the message, we should tell the root that we are rejecting the assignment and that it is retryable so that the root can reassign us
+                            if(pm.getChainList().getRootID() == pm.getSenderId()) {
+                                forwardRejectionUpstream(pm, true);
+                            }
+
+                            return "Positioning Message from " + pm.getSenderId() + "(REJECTED, incoming chain list is smaller)";
+                        } else {
+                            if(pm.getChainList().getRootID() < chainMemberList.getRootID()) {
+                                forwardRejectionToParent(true);
+                                pendingChildID = -1;
+                                setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
+                                setOriginEdge(pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
+                                unableToDoAssignmentIDs.add(pm.getSenderId());
+                                chainMemberList = pm.getChainList();
+                                log("-> assignment REJECTED by " + pm.getSenderId() + " (incoming root ID is smaller)");
+                                return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED, incoming root ID is smaller)";
+                            } else {
+                                return "Positioning Message from " + pm.getSenderId() + "(REJECTED, incoming root ID is larger)";
+                            }
+                        }
                     }
                     // Already a cycleBuilder — a second parent is racing to assign us.
                     // Don't accept, don't reject: just defer. Re-queue untouched and
@@ -217,22 +267,59 @@ public class CyclebuilderComms extends CommunicationSystem {
                     }
                 } else if(next instanceof RejectAssignmentMessage rm) {
                     pendingChildID = -1;
-                    unableToDoAssignmentIDs.add(rm.getSenderId());
                     log("-> assignment REJECTED by " + rm.getSenderId());
-                    return "Reject Assignment Message from " + rm.getSenderId() + "(REJECTED)";
+                    if(rm.isRetryable()) {
+                        log("-> assignment is retryable, will attempt to reassign");
+                    } else {
+                        unableToDoAssignmentIDs.add(rm.getSenderId());
+                        log("-> assignment is NOT retryable, will not attempt to reassign");
+                    }
+                    return "Reject Assignment Message from " + rm.getSenderId() + "(REJECTED, " + (rm.isRetryable() ? "RETRYABLE)" : " NOT RETRYABLE)");
                 } else if(next instanceof PositioningMessage pm) {
-                    log("-> reached root, reporting SUCCESS, forwarding upstream");
+                    if(!checkAssignmentForCurrentPosition(pm)) {
+                        forwardRejectionUpstream(pm, false);
+                        log("-> assignment REJECTED by " + pm.getSenderId() + "(WILL BREAK FORMATION)");
+                        return "Positioning Message from " + pm.getSenderId() + "(REJECTED)";
+
+                        //If a root sent the message, check if the next edge's cycle is complete
+                    } else if(pm.getChainList().getRootID() == pm.getSenderId()){
+                        LatticeEdge nextEdge = inferNextEdge(getAssignedEdgeFromMessage(pm));
+
+                        if(completedCycles.get(nextEdge.getId())) {
+                            forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
+                            log("-> root received message from another root, but next edge's cycle is complete, forwarding SUCCESS upstream");
+                            return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED)";
+                        } else if(!hasFailed()) {
+                            log("-> root received message from another root, but next edge's cycle is NOT complete, forwarding REJECTION upstream (RETRYABLE)");
+                            forwardRejectionUpstream(pm, true);
+                            return "Positioning Message from " + pm.getSenderId() + "(REJECTED)";
+
+                        } else {
+                            forwardRejectionUpstream(pm, false);
+                            log("-> root received message from another root, but next edge's cycle is NOT complete, forwarding REJECTION upstream (NOT RETRYABLE)");
+                            return "Positioning Message from " + pm.getSenderId() + "(REJECTED)";
+                        }
+
+                    } else {
+                        log("-> reached root, reporting SUCCESS, forwarding upstream");
                     forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
                     return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED)";
+                    }
                 } else {
                     log("-> root received unexpected message type: " + next.getMessageType());
                     return "N/A (Unhandled message type: " + next.getMessageType() + ")";
                 }
             case CycleRole.stable:
                 if(next instanceof PositioningMessage pm) {
-                    log("-> reached stable, reporting SUCCESS, forwarding upstream");
-                    forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
-                    return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED)";
+                    if(!checkAssignmentForCurrentPosition(pm)) {
+                        forwardRejectionUpstream(pm, false);
+                        log("-> assignment REJECTED by " + pm.getSenderId() + "(WILL BREAK FORMATION)");
+                        return "Positioning Message from " + pm.getSenderId() + "(REJECTED)";
+                    } else {
+                        log("-> reached stable, reporting SUCCESS, forwarding upstream");
+                        forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
+                        return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED)";
+                    }
                 } else {
                     log("-> stable received unexpected message type: " + next.getMessageType());
                     return "N/A (Unhandled message type: " + next.getMessageType() + ")";
@@ -362,10 +449,16 @@ public class CyclebuilderComms extends CommunicationSystem {
         reset();
     }
 
-    private void forwardRejectionUpstream(PositioningMessage pm) {
-        RejectAssignmentMessage rm = new RejectAssignmentMessage(pm.getRecipient(), pm.getSenderId(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
+    private void forwardRejectionUpstream(PositioningMessage pm, boolean isRetryable) {
+        RejectAssignmentMessage rm = new RejectAssignmentMessage(pm.getRecipient(), pm.getSenderId(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID(), isRetryable);
         GeometricCycleLatticeRobot robot = getNeighborByID(pm.getSenderId());
         send(robot, rm);
+    }
+
+    private void forwardRejectionToParent(boolean isRetryable) {
+        GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
+        RejectAssignmentMessage rm = new RejectAssignmentMessage(self.getRobotId(), parent.getRobotId(), originVertexID, originOutgoingEdgeID, isRetryable);
+        send(parent, rm);
     }
 
     private boolean checkAssignmentForCurrentPosition(PositioningMessage pm) {
@@ -456,7 +549,10 @@ public class CyclebuilderComms extends CommunicationSystem {
      * EDGE AND VERTEX UTIL
      */
     private LatticeEdge inferNextEdge() {
-        LatticeEdge assignedEdge = getAssignedEdge();
+        return inferNextEdge(getAssignedEdge());
+    }
+
+    private LatticeEdge inferNextEdge(LatticeEdge assignedEdge) {
         if (assignedEdge.isNull()) return null;
 
         Vertex currentVertex = getCurrentVertex();          // where this robot now sits
@@ -498,6 +594,13 @@ public class CyclebuilderComms extends CommunicationSystem {
             return new LatticeEdge();
         }
         return retrieveEdgeFromGraph(assignedVertexID, assignedOutgoingEdgeID);
+    }
+
+    public LatticeEdge getAssignedEdgeFromMessage(PositioningMessage pm) {
+        if(pm.getAssignedVertexID() == -1 || pm.getAssignedOutgoingEdgeID() == -1) {
+            return new LatticeEdge();
+        }
+        return retrieveEdgeFromGraph(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
     }
 
     public LatticeEdge getOriginEdge() {
