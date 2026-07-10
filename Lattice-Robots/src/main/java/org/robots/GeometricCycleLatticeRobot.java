@@ -41,7 +41,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     private ArrayList<GeometricCycleLatticeRobot> neighbors;
 
     private OrientedPoint assignedPosition;
-    private boolean inCongestedArea;
+    private boolean isMovingToAssignedPosition = false;
 
     // ------------------------------------------------------------
     // Constructor
@@ -60,8 +60,6 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
 
         this.edges = new CopyOnWriteArrayList<>();
         this.neighbors = new ArrayList<>();
-
-        this.inCongestedArea = false;
 
         this.assignedPosition = new OrientedPoint(pose);
     }
@@ -130,12 +128,6 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
         CommsSnapshot before = commsSystem.snapshot();
         OrientedPoint poseBefore = new OrientedPoint(pose);
 
-        if (inCongestedArea) {
-            return new TickRecord(tick, robotId, before, poseBefore,
-                    "N/A (in congested area)", "N/A (in congested area)",
-                    List.of(), before, poseBefore);
-        }
-
         commsSystem.beginTick();
         String processed;
         String action;
@@ -167,8 +159,10 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
                     // reference, instead of a parent whose residual rotation keeps sweeping the
                     // children's targets and driving the rotate-to-point jitter.
                     assignedPosition = new OrientedPoint(pose);
+                    isMovingToAssignedPosition = false;
                 } else if (target != null) {
                     assignedPosition = new OrientedPoint(target);
+                    isMovingToAssignedPosition = true;
                 }
 
                 commsSystem.makeObservations();
@@ -189,15 +183,6 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // ------------------------------------------------------------
     @Override
     public void move(double dt) {
-        if (inCongestedArea) {
-            boolean done = motionModel.move(pose, dt);
-            if (done) {
-                inCongestedArea = false;
-                assignedPosition = new OrientedPoint(pose);
-            }
-            return;
-        }
-
         if (assignedPosition != null) {
             latticeMotionModel.moveTo(pose, assignedPosition, dt);
         }
@@ -243,6 +228,10 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
 
     public void promoteToPrimaryRoot() {
         commsSystem.promoteToPriamaryRoot();
+    }
+
+    public boolean isMovingToAssignedPosition() {
+        return isMovingToAssignedPosition;
     }
 
     // ------------------------------------------------------------

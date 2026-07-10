@@ -438,9 +438,9 @@ public class AsyncRobotPanel extends JPanel {
             int tick = (int) (tickCounts.getOrDefault(id, 0L) + 1);
             rec = robot.executeTimeStep(dt, tick);
         } catch(Exception e) {
+            System.out.println("\n + [Panel] Error ticking robot " + id);  
             e.printStackTrace();
         } finally { lock.readLock().unlock(); }
-
         if(rec != null) simLogger.record(rec);
 
         // Telemetry updated outside the lock — EDT reads are display-only
@@ -532,12 +532,16 @@ public class AsyncRobotPanel extends JPanel {
 
     private void drawRobots(Graphics2D g2) {
         for (GeometricCycleLatticeRobot r : robots.values()) {
-            g2.setColor(roleColor(r));
+            Color roleColor = roleColor(r);
+            //Change to make it half transparent if moving
+            if(r.isMovingToAssignedPosition()) {
+                roleColor = new Color(127, 0, 255, 128);
+            }
+            g2.setColor(roleColor);
             Shape shape = r.draw();
 
             g2.fill(shape);
             if (r == selectedRobot) {
-                g2.setColor(Color.YELLOW);
                 g2.setStroke(new BasicStroke(2f));
                 g2.draw(shape);
             }

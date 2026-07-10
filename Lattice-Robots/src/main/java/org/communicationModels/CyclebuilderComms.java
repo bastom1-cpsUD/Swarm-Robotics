@@ -19,6 +19,7 @@ import org.graphs.LatticeEdge;
 import org.graphs.LatticeGraph;
 import org.graphs.OrientedPoint;
 import org.graphs.RigidBodyTransformation;
+import org.graphs.SquareLattice;
 import org.graphs.Vertex;
 import org.robots.GeometricCycleLatticeRobot;
 import org.simulation.Edge;
@@ -97,8 +98,8 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         if(childHasLeft && pendingChildID != -1) {
             log("-> child " + pendingChildID + " has left, clearing pendingChildID");
+            removeEdgeToChild(pendingChildID);
             pendingChildID = -1;
-            self.getEdges().removeIf(edge -> edge.getToId() == pendingChildID);
         }
     }
 
@@ -184,6 +185,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                     return "Status Message from " + sm.getSenderId() + "(FAILURE)";
                 } else if(next instanceof RejectAssignmentMessage rm) {
                     pendingChildID = -1;
+                    removeEdgeToChild(rm.getSenderId());
                     log("-> assignment REJECTED by " + rm.getSenderId());
                     if(rm.isRetryable()) {
                         forwardRejectionToParent(true);
@@ -267,6 +269,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                     }
                 } else if(next instanceof RejectAssignmentMessage rm) {
                     pendingChildID = -1;
+                    removeEdgeToChild(rm.getSenderId());
                     log("-> assignment REJECTED by " + rm.getSenderId());
                     if(rm.isRetryable()) {
                         log("-> assignment is retryable, will attempt to reassign");
@@ -305,6 +308,11 @@ public class CyclebuilderComms extends CommunicationSystem {
                     forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
                     return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED)";
                     }
+                } else if(next instanceof PromotionMessage pm) {
+                    //Neighbor promoted to stable, try again for cycle building
+                    hasFailed = false;
+                    log("-> root received Promotion Message from " + pm.getSenderId() + ", clearing hasFailed and will attempt to reassign");
+                    return "Promotion Message from " + pm.getSenderId() + "(WILL ATTEMPT TO COMPLETE CYCLES)";
                 } else {
                     log("-> root received unexpected message type: " + next.getMessageType());
                     return "N/A (Unhandled message type: " + next.getMessageType() + ")";
@@ -633,6 +641,10 @@ public class CyclebuilderComms extends CommunicationSystem {
         return e.getId();
     }
 
+    private void removeEdgeToChild(int childID) {
+        if (childID == -1) return;
+        self.getEdges().removeIf(edge -> edge.getToId() == childID);
+    }
     //STATE CHANGE UTIL
 
     public void promoteToPriamaryRoot() {

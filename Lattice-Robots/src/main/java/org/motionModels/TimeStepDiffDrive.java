@@ -111,8 +111,14 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
                 rotateTo(currentPose, newPose.orientation, dt);
             break;
 
-            case DONE:
+            case DONE: {
+                            
+                currentPose.x = newPose.x;
+                currentPose.y = newPose.y;
+                currentPose.orientation = MathUtils.normalizeAngle(newPose.orientation);
+                changeState(0, 0);
                 return true;
+            }
         }
 
         return false;

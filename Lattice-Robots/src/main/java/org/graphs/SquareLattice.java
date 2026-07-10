@@ -3,7 +3,7 @@ package org.graphs;
 import java.util.ArrayList;
 
 public class SquareLattice extends LatticeGraph {
-    private final double EDGE_LENGTH = 50.0;
+    private final double EDGE_LENGTH = 70.0;
 
     public SquareLattice() {
         super();
