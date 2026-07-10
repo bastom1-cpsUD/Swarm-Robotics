@@ -39,7 +39,7 @@ public class Vertex {
         }
 
          Vertex other = (Vertex) o;
-        return this.ID == other.getId() && this.POSE_IN_GRAPH == other.getPose();
+        return this.ID == other.getId() && this.POSE_IN_GRAPH.equals(other.getPose());
     }
 
     @Override

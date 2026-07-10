@@ -1,4 +1,4 @@
-package org.communicationModels;
+package org.communicationModels.SongOkaneComms;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -13,6 +13,9 @@ import org.graphs.OrientedPoint;
 import org.graphs.RigidBodyTransformation;
 import org.robots.LatticeRobot;
 import org.simulation.Edge;
+import org.utils.MathUtils;
+import org.communicationModels.Observation;
+import org.communicationModels.TrustLevel;
 import org.communicationModels.HungarianAlgo.HungarianAlgo;
 import org.communicationModels.HungarianAlgo.HungarianMatrixUtils;
 import org.graphs.LatticeEdge;
@@ -187,12 +190,12 @@ public class DecentralizedComms extends CommunicationSystem {
             OrientedPoint destinationInParent = edgeTransform.apply(new OrientedPoint(0,0,0));
         
             //POSSIBLY NORMALIZE THESE ANGLES THEN PASS TO ATAN2
-            double dxOrientation = TimeStepDiffDrive.normalizeAngle(xAxisInParent.x - destinationInParent.x);
-            double dyOrientation = TimeStepDiffDrive.normalizeAngle(xAxisInParent.y - destinationInParent.y);
+            double dxOrientation = MathUtils.normalizeAngle(xAxisInParent.x - destinationInParent.x);
+            double dyOrientation = MathUtils.normalizeAngle(xAxisInParent.y - destinationInParent.y);
 
             double localTheta = Math.atan2(dyOrientation, dxOrientation);
 
-            double globalOrientation = TimeStepDiffDrive.normalizeAngle(parent.getPosition().getOrientation() + localTheta);
+            double globalOrientation = MathUtils.normalizeAngle(parent.getPosition().getOrientation() + localTheta);
 
             //Do we need to convert to local if this is just for positioning???
             assignment = new OrientedPoint[] {parent.getPosition(), new OrientedPoint(assignedLocationGlobal.x, assignedLocationGlobal.y, globalOrientation)};

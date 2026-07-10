@@ -2,6 +2,7 @@ package org.motionModels;
 
 import org.graphs.OrientedPoint;
 import org.robots.LatticeRobot;
+import org.utils.MathUtils;
 
 /**
  * A class that represents a differential drive motion model for a robot, breaking down motions into discrete time steps
@@ -35,7 +36,7 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
 
     public static double getTimeToRotateTo(OrientedPoint currentPose, OrientedPoint newPose) {
         double targetAngle = Math.atan2(newPose.y - currentPose.y, newPose.x - currentPose.x);
-        double rotateBy = normalizeAngle(targetAngle - currentPose.orientation);
+        double rotateBy = MathUtils.normalizeAngle(targetAngle - currentPose.orientation);
         return Math.abs(rotateBy) / MAX_ANGULAR_SPEED;
     }
 
@@ -54,7 +55,7 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
         pose.x = pose.x + (WHEEL_RADIUS / 2) * (leftAngularVel + rightAngularVel) * Math.cos(pose.orientation) * dt;
         pose.y = pose.y + (WHEEL_RADIUS / 2) * (leftAngularVel + rightAngularVel) * Math.sin(pose.orientation) * dt;
         if(leftAngularVel != rightAngularVel) {
-            pose.orientation = normalizeAngle(pose.orientation + (WHEEL_RADIUS / DISTANCE_BETWEEN_WHEELS) * (rightAngularVel - leftAngularVel) * dt);    
+            pose.orientation = MathUtils.normalizeAngle(pose.orientation + (WHEEL_RADIUS / DISTANCE_BETWEEN_WHEELS) * (rightAngularVel - leftAngularVel) * dt);    
         }
 
         distTraveled = distTraveled + MAX_LINEAR_SPEED * dt;
@@ -96,7 +97,6 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
     public boolean moveTo(OrientedPoint currentPose, OrientedPoint newPose, double dt) {
         moveState = checkNextMoveState(currentPose, newPose);
  
-
         switch(moveState) {
 
             case ROTATE_TO_POINT:
@@ -111,8 +111,14 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
                 rotateTo(currentPose, newPose.orientation, dt);
             break;
 
-            case DONE:
+            case DONE: {
+                            
+                currentPose.x = newPose.x;
+                currentPose.y = newPose.y;
+                currentPose.orientation = MathUtils.normalizeAngle(newPose.orientation);
+                changeState(0, 0);
                 return true;
+            }
         }
 
         return false;
@@ -120,14 +126,14 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
 
     public static MoveState checkNextMoveState(OrientedPoint currentPose, OrientedPoint newPose) {
         
-        if(!isZero(currentPose.distance(newPose))) {
+        if(!MathUtils.isZero(currentPose.distance(newPose))) {
             double targetHeading = Math.atan2(newPose.y - currentPose.y, newPose.x - currentPose.x);
-            if(!isZero(normalizeAngle(targetHeading - currentPose.orientation))) {
+            if(!MathUtils.anglesEqual(targetHeading, currentPose.orientation)) {
                 return MoveState.ROTATE_TO_POINT;
             }
             return MoveState.TRANSLATE;
         } else {
-            if(!isZero(normalizeAngle(newPose.orientation - currentPose.orientation))) {
+            if(!MathUtils.anglesEqual(newPose.orientation, currentPose.orientation)) {
                 return MoveState.ROTATE_TO_FINAL;
             }
             return MoveState.DONE;
@@ -143,7 +149,7 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
     private boolean translateTo(OrientedPoint pose, OrientedPoint newPose, double dt) {
         double distance = pose.distance(newPose);
 
-        if(isZero(distance)) {
+        if(MathUtils.isZero(distance)) {
             pose.x = newPose.x;
             pose.y = newPose.y;
             changeState(0, 0);
@@ -156,8 +162,12 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
 
         double step = linearVelocity * dt;
 
-        if(step > distance) {
-            step = distance;
+        if(step >= distance) {
+            pose.x = newPose.x;
+            pose.y = newPose.y;
+            changeState(0, 0);
+            distTraveled = distTraveled + distance;
+            return true;
         }
 
         pose.x += step * Math.cos(pose.orientation);
@@ -168,9 +178,9 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
     }
     
     private boolean rotateTo(OrientedPoint pose, double targetAngle, double dt) {
-        double rotateBy = normalizeAngle(targetAngle - pose.orientation);
+        double rotateBy = MathUtils.normalizeAngle(targetAngle - pose.orientation);
         // tolerance
-        if(isZero(rotateBy)) {
+        if(MathUtils.isZero(rotateBy)) {
             pose.orientation = targetAngle;
             changeState(0, 0);
             return true;
@@ -189,33 +199,13 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
             angularStep = rotateBy;
         }
 
-        pose.orientation = normalizeAngle(pose.orientation + angularStep);
+        pose.orientation = MathUtils.normalizeAngle(pose.orientation + angularStep);
 
         return false;
     }
     
-    public static double normalizeAngle(double angle) {
-        while(angle > Math.PI) {
-            angle -= 2 * Math.PI;
-        }
-
-        while(angle <= -Math.PI) {
-            angle += 2 * Math.PI;
-        }
-
-        return angle;
-    }
-
     private void changeState(double leftAngVel, double rightAngVel) {
         this.leftAngularVel = leftAngVel;
         this.rightAngularVel = rightAngVel;
-    }
-
-    private static boolean isZero(double value) {
-        return Math.abs(value) < 1e-3;
-    }
-
-    public double getAssignmentChangeThreshold() {
-        return ASSIGNMENT_CHANGE_THRESHOLD;
     }
 }
