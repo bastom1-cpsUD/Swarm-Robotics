@@ -6,17 +6,13 @@ Graph representation is a fundamental component of the decentralized swarm forma
 
 A formation is represented as a directed graph
 
-\[
 G = (V, E)
-\]
 
 where **V** is the set of vertices and **E** is the set of directed edges. Rather than representing individual robots, each vertex represents a **role** within the formation. During execution, every robot assumes one of these roles.
 
 Each role contains a collection of outgoing edges that describe the desired rigid-body transformations from that role to neighboring roles. Once assigned a role, a robot uses these outgoing edges to determine how neighboring robots should be assigned within the formation. Conceptually, this process can be viewed as a function
 
-\[
-f : N \rightarrow E_o
-\]
+f : N -> E_o
 
 where **N** is the set of neighboring robots and **E<sub>o</sub>** is the set of outgoing edges associated with the robot's assigned role.
 
@@ -30,9 +26,7 @@ This document proposes replacing the Lattice Graph with a **Doubly Connected Edg
 
 The Lattice Graph is a strongly connected directed multigraph
 
-\[
 G = (V, E).
-\]
 
 Each directed edge represents a desired rigid-body transformation from a source role to a neighboring target role. Every edge has a corresponding inverse edge that represents the reverse rigid-body transformation, allowing traversal back to the source role.
 
