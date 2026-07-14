@@ -44,12 +44,50 @@ public class RigidBodyTransformation {
     }
 
     /**
+     * Returns the identity transformation (no rotation, no translation).
+     * @return The identity transformation.
+     */
+    public static RigidBodyTransformation identity() {
+        return new RigidBodyTransformation(new OrientedPoint(0, 0, 0));
+    }
+
+    /**
      * Returns the inverse of this transformation.
      * @return The inverse transformation.
      */
     public RigidBodyTransformation inverse() {
         Matrix inverseMatrix = this.matrix.inverse();
         return new RigidBodyTransformation(inverseMatrix);
+    }
+
+    /**
+     * Composes this transformation with another, applied after this one.
+     * @param other the transformation expressed relative to this one's target frame
+     * @return the combined transformation from this one's source frame to other's target frame
+     */
+    public RigidBodyTransformation compose(RigidBodyTransformation other) {
+        return new RigidBodyTransformation(this.matrix.times(other.matrix));
+    }
+
+    /**
+     * Checks whether this transformation is within epsilon of the identity transformation.
+     * @param epsilon the per-entry tolerance
+     * @return whether every matrix entry is within epsilon of its identity value
+     */
+    public boolean isApproximatelyIdentity(double epsilon) {
+        int rows = matrix.getRowDimension();
+        int cols = matrix.getColumnDimension();
+
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+                double expected = (i == j) ? 1.0 : 0.0;
+                if (Math.abs(matrix.get(i, j) - expected) > epsilon) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     /**
