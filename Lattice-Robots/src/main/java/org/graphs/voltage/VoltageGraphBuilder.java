@@ -74,6 +74,31 @@ public final class VoltageGraphBuilder {
         return this;
     }
 
+    /**
+     * Registers a half-edge that is its own twin: a role of odd physical
+     * degree (e.g. octagon-square's 3) can't be built entirely from
+     * addHalfEdgePair, since every pair contributes an even number of
+     * outgoing edges. A self-twin edge is only valid where the tiling has a
+     * symmetry reversing that edge in place, which forces its voltage to be
+     * self-inverse (a 180-degree rotation); this is checked, not assumed.
+     */
+    public HalfEdge addSelfTwinHalfEdge(Role role, OrientedPoint voltagePose) {
+        RigidBodyTransformation voltage = new RigidBodyTransformation(role.getPose(), voltagePose);
+        if (!voltage.compose(voltage).isApproximatelyIdentity(VoltageGraph.DEFAULT_EPSILON)) {
+            throw new IllegalArgumentException(
+                "VoltageGraphBuilder.addSelfTwinHalfEdge(): voltage is not self-inverse "
+                + "(a self-twin edge must be a 180-degree rotation)");
+        }
+
+        HalfEdge h = new HalfEdge(nextHalfEdgeId++, role, voltage);
+        h.setTwin(h);
+
+        insertionOrder.get(role).add(h);
+        allHalfEdges.add(h);
+
+        return h;
+    }
+
     public VoltageGraph build() {
         if (primaryRole == null) {
             throw new IllegalStateException("VoltageGraphBuilder.build(): no primary role set");
@@ -125,6 +150,11 @@ public final class VoltageGraphBuilder {
         }
     }
 
+    // A safety cap on how many times a label orbit may repeat while its
+    // holonomy is checked -- generous relative to the rotation orders (up to
+    // 6-fold) any real wallpaper group symmetry can contribute.
+    private static final int MAX_LAPS = 24;
+
     private List<Face> discoverFaces() {
         List<Face> faces = new ArrayList<>();
         Set<HalfEdge> visited = new HashSet<>();
@@ -135,29 +165,42 @@ public final class VoltageGraphBuilder {
                 continue;
             }
 
-            List<HalfEdge> orbit = new ArrayList<>();
+            // The label orbit -- following next() back to the starting
+            // half-edge object. A role can have fewer outgoing edges than the
+            // faces it borders are long (e.g. octagon-square's single role,
+            // where the square face repeats one label four times), so the
+            // label orbit closing is necessary but not sufficient: the
+            // physical face closes only once the ACCUMULATED voltage over
+            // some number of laps of this orbit reaches identity. See
+            // DCEL-Implementation-Plan.md sec 2.3 / primer sec 7.
+            List<HalfEdge> labelOrbit = new ArrayList<>();
             HalfEdge h = start;
             do {
-                orbit.add(h);
-                visited.add(h);
+                labelOrbit.add(h);
                 h = h.getNext();
             } while (h != start);
 
             RigidBodyTransformation holonomy = RigidBodyTransformation.identity();
-            for (HalfEdge e : orbit) {
-                holonomy = holonomy.compose(e.getVoltage());
-            }
+            int totalSteps = 0;
+            int laps = 0;
+            do {
+                for (HalfEdge e : labelOrbit) {
+                    holonomy = holonomy.compose(e.getVoltage());
+                    totalSteps++;
+                }
+                laps++;
+            } while (!holonomy.isApproximatelyIdentity(VoltageGraph.DEFAULT_EPSILON) && laps < MAX_LAPS);
 
             if (!holonomy.isApproximatelyIdentity(VoltageGraph.DEFAULT_EPSILON)) {
                 throw new IllegalStateException(
                     "VoltageGraphBuilder.build(): face starting at half-edge "
-                    + start.getId() + " does not close -- holonomy over "
-                    + orbit.size() + " step(s) is not the identity transform. "
-                    + "Check the declared poses and rotation order.");
+                    + start.getId() + " does not close within " + MAX_LAPS
+                    + " lap(s) of its label orbit. Check the declared poses and rotation order.");
             }
 
-            Face face = new Face(faceId++, start, orbit.size(), holonomy);
-            for (HalfEdge e : orbit) {
+            visited.addAll(labelOrbit);
+            Face face = new Face(faceId++, start, totalSteps, holonomy);
+            for (HalfEdge e : labelOrbit) {
                 e.setFace(face);
             }
             faces.add(face);
