@@ -39,6 +39,10 @@ public class RigidBodyTransformation {
         });
     }
     
+    public RigidBodyTransformation() {
+        this.matrix = Matrix.identity(3, 3);
+    }
+
     private RigidBodyTransformation(Matrix matrix) {
         this.matrix = matrix;
     }
@@ -66,6 +70,11 @@ public class RigidBodyTransformation {
         return new OrientedPoint(x, y, orientation);
     }
 
+    public RigidBodyTransformation compose(RigidBodyTransformation other) {
+        Matrix resultMatrix = this.matrix.times(other.matrix);
+        return new RigidBodyTransformation(resultMatrix);
+    }
+
     /**
      * Determines whether the a provided Rigid Body Transformation is an inverse
      * @param other a second Rigid Body Transformation
@@ -89,6 +98,34 @@ public class RigidBodyTransformation {
                 double expected = (i == j) ? 1.0 : 0.0;
 
                 if (Math.abs(result.get(i, j) - expected) > epsilon) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Determines whether this transformation is approximately the identity
+     * transformation within a specified tolerance.
+     *
+     * @param epsilon the maximum allowable error for each matrix entry
+     * @return true if this transformation is approximately the identity matrix
+     */
+    public boolean isApproximatelyIdentity(double epsilon) {
+        int rows = matrix.getRowDimension();
+        int cols = matrix.getColumnDimension();
+
+        if (rows != cols) {
+            return false;
+        }
+
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+                double expected = (i == j) ? 1.0 : 0.0;
+
+                if (Math.abs(matrix.get(i, j) - expected) > epsilon) {
                     return false;
                 }
             }
