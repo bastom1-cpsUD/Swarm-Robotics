@@ -81,6 +81,13 @@ public final class VoltageGraphBuilder {
      * outgoing edges. A self-twin edge is only valid where the tiling has a
      * symmetry reversing that edge in place, which forces its voltage to be
      * self-inverse (a 180-degree rotation); this is checked, not assumed.
+     *
+     * A face may use a self-twin edge only interleaved with an edge whose
+     * rotation isn't itself 180 degrees. Two or more self-twin edges used
+     * consecutively with nothing else can never close (composing two
+     * 180-degree rotations about different centers is always a nonzero pure
+     * translation, by Chasles' theorem), so build() rejecting such an orbit
+     * after MAX_LAPS is a real mathematical fact, not just an unmet guess.
      */
     public HalfEdge addSelfTwinHalfEdge(Role role, OrientedPoint voltagePose) {
         RigidBodyTransformation voltage = new RigidBodyTransformation(role.getPose(), voltagePose);
