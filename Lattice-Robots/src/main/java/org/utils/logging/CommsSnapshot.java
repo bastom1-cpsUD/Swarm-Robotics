@@ -6,7 +6,7 @@ import org.communicationModels.Observation;
 import org.communicationModels.TrustLevel;
 import org.communicationModels.Messages.AbstractMessage;
 import org.communicationModels.Messages.ChainMemberList;
-import org.graphs.LatticeEdge;
+import org.graphs.voltage.HalfEdge;
 
 import java.util.List;
 import java.util.Map;
@@ -32,8 +32,8 @@ public record CommsSnapshot(
         int pendingChildID,
         int stableID,
         ChainMemberList chainMemberList,
-        LatticeEdge assignedEdge,
-        LatticeEdge originEdge,
+        HalfEdge assignedEdge,
+        HalfEdge originEdge,
         Map<Integer, Boolean> completedCycles,
         List<AbstractMessage> queueInOrder,
         Map<Integer, Observation> observations,

@@ -281,9 +281,10 @@ private static final LatticeDCEL graph = HexagonDCEL.build(); // or OctagonSquar
 
 private HalfEdge inferNextEdge(HalfEdge assignedEdge) {
     if (assignedEdge == null) return null;
-    // sigma_{target}(twin(h)) -- exactly the rotation-system rule from §2.2,
-    // now an O(1) field read instead of an id-arithmetic guess.
-    return graph.next(graph.twin(assignedEdge));
+    // h.next() already IS sigma_{target}(twin(h)) -- the rotation-system rule
+    // from §2.2 is baked in once, at construction time, not recomputed here.
+    // (Calling graph.twin() again on top of it would apply the rule twice.)
+    return graph.next(assignedEdge);
 }
 
 private Role getCurrentRole() {
@@ -375,7 +376,7 @@ inspection.
    see §5).
 3. **Migrate `SquareLattice` and `HexagonLattice`** to
    `LatticeDCELBuilder`-based declarations. Add a golden/characterization
-   test asserting the new `graph.next(graph.twin(h))` sequence matches what
+   test asserting the new `graph.next(h)` sequence matches what
    `CyclebuilderComms.inferNextEdge` currently produces for every edge, for
    both lattices — this is the regression safety net for the swap.
 4. **Add `OctagonSquareDCEL`** (§5) as new-capability coverage: this is the

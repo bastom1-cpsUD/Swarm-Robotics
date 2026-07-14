@@ -11,9 +11,9 @@ import org.communicationModels.CyclebuilderComms;
 import org.communicationModels.TrustLevel;
 import org.communicationModels.Messages.AbstractMessage;
 import org.drawingModels.TriangularModel;
-import org.graphs.HexagonLattice;
-import org.graphs.LatticeGraph;
 import org.graphs.OrientedPoint;
+import org.graphs.voltage.HexagonVoltageGraph;
+import org.graphs.voltage.VoltageGraph;
 import org.utils.logging.CommsSnapshot;
 import org.utils.logging.TickRecord;
 import org.motionModels.LatticeMotionModel;
@@ -47,16 +47,15 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // Constructor
     // ------------------------------------------------------------
     public GeometricCycleLatticeRobot(int id, OrientedPoint pose) {
-        this(id, pose, new HexagonLattice());
+        this(id, pose, HexagonVoltageGraph.build());
     }
 
-    public GeometricCycleLatticeRobot(int id, OrientedPoint pose, LatticeGraph graph) {
+    public GeometricCycleLatticeRobot(int id, OrientedPoint pose, VoltageGraph graph) {
         super(id, pose, new TimeStepDiffDrive(), new TriangularModel());
 
         this.latticeMotionModel = (LatticeMotionModel) motionModel;
 
-        // NEW comms system (no graph passed in anymore)
-        this.commsSystem = new CyclebuilderComms(this);
+        this.commsSystem = new CyclebuilderComms(this, graph);
 
         this.edges = new CopyOnWriteArrayList<>();
         this.neighbors = new ArrayList<>();

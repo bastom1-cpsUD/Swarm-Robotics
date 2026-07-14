@@ -14,13 +14,12 @@ import org.communicationModels.Messages.PositioningMessage;
 import org.communicationModels.Messages.PromotionMessage;
 import org.communicationModels.Messages.RejectAssignmentMessage;
 import org.communicationModels.Messages.StatusMessage;
-import org.graphs.HexagonLattice;
-import org.graphs.LatticeEdge;
-import org.graphs.LatticeGraph;
 import org.graphs.OrientedPoint;
 import org.graphs.RigidBodyTransformation;
-import org.graphs.SquareLattice;
-import org.graphs.Vertex;
+import org.graphs.voltage.HalfEdge;
+import org.graphs.voltage.HexagonVoltageGraph;
+import org.graphs.voltage.Role;
+import org.graphs.voltage.VoltageGraph;
 import org.robots.GeometricCycleLatticeRobot;
 import org.simulation.Edge;
 import org.utils.MathUtils;
@@ -32,7 +31,7 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     private static final boolean VERBOSE = true;
     private HashMap<Integer, Boolean> completedCycles;
-    private static final LatticeGraph graph = new HexagonLattice();
+    private final VoltageGraph graph;
 
     // State-Data
     private int stableID;
@@ -58,6 +57,11 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     //MAIN ALGORITHM STEPS
     public CyclebuilderComms(GeometricCycleLatticeRobot self) {
+        this(self, HexagonVoltageGraph.build());
+    }
+
+    public CyclebuilderComms(GeometricCycleLatticeRobot self, VoltageGraph graph) {
+        this.graph = graph;
         this.trust = TrustLevel.Friendly;
         this.stableID = -1;
         this.pendingChildID = -1;
@@ -156,7 +160,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                     chainMemberList = pm.getChainList();
                     self.addEdge(new Edge(self.getRobotId(), chainMemberList.getSenderID()));
                     log("-> became cycleBuilder: edge id=" + getAssignedEdge().getId()
-                            + " from vertex " + getAssignedEdge().getFrom().getId()
+                            + " from vertex " + getAssignedEdge().getOrigin().getId()
                             + ", root=" + chainMemberList.getRootID()
                             + ", chain=" + chainMemberList.getIDList());
                     return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED)";
@@ -286,7 +290,7 @@ public class CyclebuilderComms extends CommunicationSystem {
 
                         //If a root sent the message, check if the next edge's cycle is complete
                     } else if(pm.getChainList().getRootID() == pm.getSenderId()){
-                        LatticeEdge nextEdge = inferNextEdge(getAssignedEdgeFromMessage(pm));
+                        HalfEdge nextEdge = inferNextEdge(getAssignedEdgeFromMessage(pm));
 
                         if(completedCycles.get(nextEdge.getId())) {
                             forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
@@ -376,7 +380,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                     return "Done (All cycles completed, promoted to stable)";
                 }
 
-                LatticeEdge targetEdge = retrieveEdgeFromGraph(getCurrentVertex().getId(), targetEdgeID);
+                HalfEdge targetEdge = retrieveEdgeFromGraph(targetEdgeID);
 
                 // 2. Cycle does not exist. Build it!
                 GeometricCycleLatticeRobot childToBuild = findBestNeighborForEdge(targetEdge);
@@ -395,7 +399,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                     log("Message sent to " + childToBuild.getRobotId());
                 }
                 return "Assigned position to robot " + childToBuild.getRobotId()
-                        + " for edge " + targetEdge.getId() + " of vertex " + targetEdge.getFrom().getId();
+                        + " for edge " + targetEdge.getId() + " of vertex " + targetEdge.getOrigin().getId();
             }
             case CycleRole.cycleBuilder: {
                 if(pendingChildID != -1) {
@@ -408,7 +412,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                     log("Sending Message...");
                 }
 
-                LatticeEdge targetEdge = inferNextEdge();
+                HalfEdge targetEdge = inferNextEdge();
 
                 GeometricCycleLatticeRobot child = findBestNeighborForEdge(targetEdge);
 
@@ -427,7 +431,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                 send(child, pm);
                 self.addEdge(new Edge(self.getRobotId(), child.getRobotId()));
                 pendingChildID = child.getRobotId();
-                return "Assigned position to robot " + child.getRobotId() + " for edge " + targetEdge.getId() + " of vertex " + targetEdge.getFrom().getId();
+                return "Assigned position to robot " + child.getRobotId() + " for edge " + targetEdge.getId() + " of vertex " + targetEdge.getOrigin().getId();
             }
             case CycleRole.unassigned:
                 return "N/A (Unassigned robot do not broadcast)";
@@ -482,18 +486,18 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     //ROOT-RELATED UTIL
     private void initializeEdgeMap() {
-        Vertex myVertex = getCurrentVertex();
-        ArrayList<LatticeEdge> edges = graph.getOutgoingEdges(myVertex);
-        for(LatticeEdge edge : edges) {
+        Role myRole = getCurrentRole();
+        List<HalfEdge> edges = graph.getOutgoingHalfEdges(myRole);
+        for(HalfEdge edge : edges) {
             completedCycles.put(getEdgeIDof(edge), false);
         }
     }
 
     private void promoteAdjacentVerticesToRoots() {
-        Vertex myVertex = getCurrentVertex();
-        ArrayList<LatticeEdge> edges = graph.getOutgoingEdges(myVertex);
+        Role myRole = getCurrentRole();
+        List<HalfEdge> edges = graph.getOutgoingHalfEdges(myRole);
 
-        for(LatticeEdge edge : edges) {
+        for(HalfEdge edge : edges) {
             GeometricCycleLatticeRobot neighbor = findBestNeighborForEdge(edge);
             PromotionMessage pm = new PromotionMessage(self.getRobotId(), neighbor.getRobotId(), getVertexIDof(edge), getEdgeIDof(edge));
             send(neighbor, pm);
@@ -511,7 +515,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         return null;
     }
 
-    private GeometricCycleLatticeRobot findBestNeighborForEdge(LatticeEdge targetEdge) {
+    private GeometricCycleLatticeRobot findBestNeighborForEdge(HalfEdge targetEdge) {
         OrientedPoint targetLocal  = getTargetInLocalCoordinates(targetEdge);
             log("Beginning decision process");
 
@@ -549,78 +553,65 @@ public class CyclebuilderComms extends CommunicationSystem {
         return getNeighborByID(bestNeighborID); // null if truly none — genuine dead end
     }
 
-    private OrientedPoint getTargetInLocalCoordinates(LatticeEdge edge) {
-        return edge.getToPos();
+    private OrientedPoint getTargetInLocalCoordinates(HalfEdge edge) {
+        return edge.getVoltage().apply(new OrientedPoint(0, 0, 0));
     }
 
     /**
-     * EDGE AND VERTEX UTIL
+     * EDGE AND ROLE UTIL
      */
-    private LatticeEdge inferNextEdge() {
+    private HalfEdge inferNextEdge() {
         return inferNextEdge(getAssignedEdge());
     }
 
-    private LatticeEdge inferNextEdge(LatticeEdge assignedEdge) {
-        if (assignedEdge.isNull()) return null;
+    private HalfEdge inferNextEdge(HalfEdge assignedEdge) {
+        if (assignedEdge == null) return null;
 
-        Vertex currentVertex = getCurrentVertex();          // where this robot now sits
-        Vertex incomingFromType = assignedEdge.getFrom();    // sublattice the assignment came from
-
-        ArrayList<LatticeEdge> candidateEdges = graph.getOutgoingEdges(currentVertex);
-        if (candidateEdges.isEmpty()) return null;
-
-        int incomingId = assignedEdge.getId();
-
-        // HexagonLattice: "v1" sublattice carries Vertex ID 1, "v2" carries ID 2.
-        // Leaving v1 keeps the same edge id (continue the perimeter rotation);
-        // leaving v2 advances to the next id, wrapping 3 -> 1.
-        int nextId = (incomingFromType.getId() == 1)
-                ? incomingId
-                : (incomingId % candidateEdges.size()) + 1;
-
-        for (LatticeEdge edge : candidateEdges) {
-            if (edge.getId() == nextId) {
-                return edge;
-            }
-        }
-
-        return null;
+        // next(h) is already "cross to twin(h), then rotate" -- Edmonds' rule
+        // -- resolved once by VoltageGraphBuilder.build() and stored on the
+        // half-edge itself. See DCEL-Implementation-Plan.md sec 2.2 / 4.
+        return graph.getNext(assignedEdge);
     }
 
-    private Vertex getCurrentVertex() {
-        LatticeEdge assignedEdge = getAssignedEdge();
+    private Role getCurrentRole() {
+        HalfEdge assignedEdge = getAssignedEdge();
 
-        if(assignedEdge.isNull()) {
-            return graph.getPrimaryVertex();
+        if(assignedEdge == null) {
+            return graph.getPrimaryRole();
         }
 
-        return assignedEdge.getTo();
+        return assignedEdge.getTarget();
     }
 
-    public LatticeEdge getAssignedEdge() {
+    public HalfEdge getAssignedEdge() {
         if(assignedVertexID == -1 || assignedOutgoingEdgeID == -1) {
-            return new LatticeEdge();
+            return null;
         }
-        return retrieveEdgeFromGraph(assignedVertexID, assignedOutgoingEdgeID);
+        return retrieveEdgeFromGraph(assignedOutgoingEdgeID);
     }
 
-    public LatticeEdge getAssignedEdgeFromMessage(PositioningMessage pm) {
+    public HalfEdge getAssignedEdgeFromMessage(PositioningMessage pm) {
         if(pm.getAssignedVertexID() == -1 || pm.getAssignedOutgoingEdgeID() == -1) {
-            return new LatticeEdge();
+            return null;
         }
-        return retrieveEdgeFromGraph(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
+        return retrieveEdgeFromGraph(pm.getAssignedOutgoingEdgeID());
     }
 
-    public LatticeEdge getOriginEdge() {
+    public HalfEdge getOriginEdge() {
         if(originVertexID == -1 || originOutgoingEdgeID == -1) {
-            return new LatticeEdge();
+            return null;
         }
 
-        return retrieveEdgeFromGraph(originVertexID, originOutgoingEdgeID);
+        return retrieveEdgeFromGraph(originOutgoingEdgeID);
     }
 
-    private LatticeEdge retrieveEdgeFromGraph(int vertexID, int edgeID) {
-        return graph.getOutgoingEdgeByID(vertexID, edgeID);
+    // vertexID is still stored (see setAssignedEdge/setOriginEdge) so the
+    // wire format shared with PositioningMessage/PromotionMessage/etc. stays
+    // unchanged, but it's no longer needed for lookup: HalfEdge ids are
+    // globally unique (unlike the old per-vertex-local LatticeEdge ids), so
+    // edgeID alone identifies the edge.
+    private HalfEdge retrieveEdgeFromGraph(int edgeID) {
+        return graph.getHalfEdgeById(edgeID);
     }
 
     public void setAssignedEdge(int vertexID, int edgeID) {
@@ -633,11 +624,11 @@ public class CyclebuilderComms extends CommunicationSystem {
         originOutgoingEdgeID = edgeID;
     }
 
-    public int getVertexIDof(LatticeEdge e) {
-        return e.getFrom().getId();
+    public int getVertexIDof(HalfEdge e) {
+        return e.getOrigin().getId();
     }
 
-    public int getEdgeIDof(LatticeEdge e) {
+    public int getEdgeIDof(HalfEdge e) {
         return e.getId();
     }
 
@@ -677,25 +668,25 @@ public class CyclebuilderComms extends CommunicationSystem {
             return self.getPosition();
         }
 
-        LatticeEdge assignedEdge = getAssignedEdge();
+        HalfEdge assignedEdge = getAssignedEdge();
 
-        if (assignedEdge.isNull()) return null;
+        if (assignedEdge == null) return null;
 
         GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
         if (parent == null) return null;
 
         return new RigidBodyTransformation(parent.getPosition())
-                .apply(assignedEdge.getToPos());
+                .apply(getTargetInLocalCoordinates(assignedEdge));
     }
 
     private OrientedPoint getAssignedLocalPosition(PositioningMessage pm) {
-        LatticeEdge assignedEdge = retrieveEdgeFromGraph(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
+        HalfEdge assignedEdge = retrieveEdgeFromGraph(pm.getAssignedOutgoingEdgeID());
 
-        if(assignedEdge.isNull()) return null;
+        if(assignedEdge == null) return null;
 
         GeometricCycleLatticeRobot parent = getNeighborByID(pm.getSenderId());
 
-        OrientedPoint assignedGlobalPosition = new RigidBodyTransformation(parent.getPosition()).apply(assignedEdge.getToPos());
+        OrientedPoint assignedGlobalPosition = new RigidBodyTransformation(parent.getPosition()).apply(getTargetInLocalCoordinates(assignedEdge));
 
         return new RigidBodyTransformation(self.getPosition()).inverse().apply(assignedGlobalPosition);
     }
