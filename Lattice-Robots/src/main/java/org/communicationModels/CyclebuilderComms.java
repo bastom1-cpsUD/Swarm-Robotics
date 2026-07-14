@@ -477,7 +477,13 @@ public class CyclebuilderComms extends CommunicationSystem {
         OrientedPoint localAssignment = getAssignedLocalPosition(pm);
         log("Assigned local position is: " + localAssignment);
 
-        OrientedPoint positionInLocal = new RigidBodyTransformation(self.getPosition()).inverse().apply(self.getPosition());
+        // Self, expressed in self's own frame, is always exactly the origin --
+        // not just approximately so for zero-rotation edges, as computing it
+        // via RigidBodyTransformation(self).inverse().apply(self) would give
+        // (RigidBodyTransformation.apply() discards the input point's own
+        // orientation, so that formula silently returned (0, 0, -selfOrientation)
+        // instead of (0, 0, 0) whenever self's orientation was nonzero).
+        OrientedPoint positionInLocal = new OrientedPoint(0, 0, 0);
 
         return MathUtils.approxEquals(localAssignment.x, positionInLocal.getX(), MathUtils.POSITION_EPSILON)
                 && MathUtils.approxEquals(localAssignment.y, positionInLocal.getY(), MathUtils.POSITION_EPSILON)
@@ -675,8 +681,8 @@ public class CyclebuilderComms extends CommunicationSystem {
         GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
         if (parent == null) return null;
 
-        return new RigidBodyTransformation(parent.getPosition())
-                .apply(getTargetInLocalCoordinates(assignedEdge));
+        return globalTransformOf(parent.getPosition(), assignedEdge.getVoltage())
+                .apply(new OrientedPoint(0, 0, 0));
     }
 
     private OrientedPoint getAssignedLocalPosition(PositioningMessage pm) {
@@ -686,9 +692,25 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         GeometricCycleLatticeRobot parent = getNeighborByID(pm.getSenderId());
 
-        OrientedPoint assignedGlobalPosition = new RigidBodyTransformation(parent.getPosition()).apply(getTargetInLocalCoordinates(assignedEdge));
+        RigidBodyTransformation assignedGlobalTransform = globalTransformOf(parent.getPosition(), assignedEdge.getVoltage());
 
-        return new RigidBodyTransformation(self.getPosition()).inverse().apply(assignedGlobalPosition);
+        return new RigidBodyTransformation(self.getPosition()).inverse()
+                .compose(assignedGlobalTransform)
+                .apply(new OrientedPoint(0, 0, 0));
+    }
+
+    /**
+     * Composes a base pose with a transform relative to it (e.g. an edge's
+     * voltage) into the resulting global transform, correctly accumulating
+     * rotation. RigidBodyTransformation.apply() discards the orientation of
+     * whatever point it's given, so chaining via
+     * {@code new RigidBodyTransformation(basePose).apply(relative.apply(origin))}
+     * silently drops any rotation `relative` carries -- invisible for
+     * square/hex, where every edge's rotation is zero, but wrong for
+     * octagon-square, where it usually isn't.
+     */
+    private static RigidBodyTransformation globalTransformOf(OrientedPoint basePose, RigidBodyTransformation relative) {
+        return new RigidBodyTransformation(basePose).compose(relative);
     }
 
     public void reset() {
