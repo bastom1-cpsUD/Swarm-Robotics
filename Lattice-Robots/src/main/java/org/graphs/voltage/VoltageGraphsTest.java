@@ -1,5 +1,6 @@
 package org.graphs.voltage;
 
+import org.graphs.OrientedPoint;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -33,12 +34,18 @@ class VoltageGraphsTest {
     }
 
     @Test
-    @DisplayName("OctagonSquareVoltageGraph: one square face and one octagon face, from a single degree-3 role")
+    @DisplayName("OctagonSquareVoltageGraph: one square face and one octagon face, from four roles")
     void octagonSquareVoltageGraph_hasSquareAndOctagonFaces() {
         VoltageGraph graph = OctagonSquareVoltageGraph.build();
 
-        assertEquals(1, graph.getRoles().size());
-        assertEquals(3, graph.getOutgoingHalfEdges(graph.getPrimaryRole()).size());
+        // Four roles -- one per rotation state (0/90/180/270 degrees) a copy
+        // of the tiling's single vertex-transitive vertex can appear in --
+        // connected entirely by pure translations, so no edge ever needs a
+        // rotation component and no role needs to be self-referencing.
+        assertEquals(4, graph.getRoles().size());
+        for (Role role : graph.getRoles()) {
+            assertEquals(3, graph.getOutgoingHalfEdges(role).size());
+        }
 
         assertEquals(2, graph.getFaces().size());
         Set<Integer> cycleLengths = graph.getFaces().stream()
@@ -48,8 +55,21 @@ class VoltageGraphsTest {
     }
 
     @Test
-    @DisplayName("OctagonSquareVoltageGraph: the square face repeats edge A four times")
-    void octagonSquareVoltageGraph_squareFaceRepeatsSingleEdge() {
+    @DisplayName("OctagonSquareVoltageGraph: every edge is a pure translation (zero rotation)")
+    void octagonSquareVoltageGraph_everyEdgeIsPureTranslation() {
+        VoltageGraph graph = OctagonSquareVoltageGraph.build();
+
+        for (Role role : graph.getRoles()) {
+            for (HalfEdge h : graph.getOutgoingHalfEdges(role)) {
+                OrientedPoint delta = h.getVoltage().apply(new OrientedPoint(0, 0, 0));
+                assertEquals(0.0, delta.getOrientation(), 1e-9);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("OctagonSquareVoltageGraph: the square face visits four distinct roles via four distinct edges")
+    void octagonSquareVoltageGraph_squareFaceUsesFourDistinctEdges() {
         VoltageGraph graph = OctagonSquareVoltageGraph.build();
 
         Face squareFace = graph.getFaces().stream()
@@ -58,13 +78,14 @@ class VoltageGraphsTest {
 
         List<HalfEdge> boundary = squareFace.getBoundary();
         assertEquals(4, boundary.size());
-        assertTrue(boundary.stream().allMatch(h -> h == boundary.get(0)));
+        assertEquals(4, Set.copyOf(boundary).size());
+        assertEquals(4, boundary.stream().map(HalfEdge::getOrigin).collect(Collectors.toSet()).size());
         assertTrue(graph.validateCycle(boundary));
     }
 
     @Test
-    @DisplayName("OctagonSquareVoltageGraph: the octagon face alternates two edges eight times over")
-    void octagonSquareVoltageGraph_octagonFaceAlternatesTwoEdges() {
+    @DisplayName("OctagonSquareVoltageGraph: the octagon face uses eight distinct edges")
+    void octagonSquareVoltageGraph_octagonFaceUsesEightDistinctEdges() {
         VoltageGraph graph = OctagonSquareVoltageGraph.build();
 
         Face octagonFace = graph.getFaces().stream()
@@ -73,7 +94,7 @@ class VoltageGraphsTest {
 
         List<HalfEdge> boundary = octagonFace.getBoundary();
         assertEquals(8, boundary.size());
-        assertEquals(2, Set.copyOf(boundary).size());
+        assertEquals(8, Set.copyOf(boundary).size());
         assertTrue(graph.validateCycle(boundary));
     }
 }
