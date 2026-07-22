@@ -11,8 +11,11 @@ import org.communicationModels.CyclebuilderComms;
 import org.communicationModels.TrustLevel;
 import org.communicationModels.Messages.AbstractMessage;
 import org.drawingModels.TriangularModel;
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
+import org.graphs.voltage.DodecagonTriangleVoltageGraph;
+import org.graphs.voltage.HexagonTriangleVoltageGraph;
 import org.graphs.voltage.HexagonVoltageGraph;
+import org.graphs.voltage.OctagonSquareVoltageGraph;
 import org.graphs.voltage.VoltageGraph;
 import org.utils.logging.CommsSnapshot;
 import org.utils.logging.TickRecord;
@@ -30,7 +33,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // Constants
     // ------------------------------------------------------------
     public static final double COMM_RANGE = 75.0;
-
+    public static final VoltageGraph GRAPH = DodecagonTriangleVoltageGraph.build();
     // ------------------------------------------------------------
     // Fields
     // ------------------------------------------------------------
@@ -47,15 +50,11 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // Constructor
     // ------------------------------------------------------------
     public GeometricCycleLatticeRobot(int id, OrientedPoint pose) {
-        this(id, pose, HexagonVoltageGraph.build());
-    }
-
-    public GeometricCycleLatticeRobot(int id, OrientedPoint pose, VoltageGraph graph) {
         super(id, pose, new TimeStepDiffDrive(), new TriangularModel());
 
         this.latticeMotionModel = (LatticeMotionModel) motionModel;
 
-        this.commsSystem = new CyclebuilderComms(this, graph);
+        this.commsSystem = new CyclebuilderComms(this, GRAPH);
 
         this.edges = new CopyOnWriteArrayList<>();
         this.neighbors = new ArrayList<>();

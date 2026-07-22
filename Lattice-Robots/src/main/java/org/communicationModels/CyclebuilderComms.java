@@ -14,10 +14,11 @@ import org.communicationModels.Messages.PositioningMessage;
 import org.communicationModels.Messages.PromotionMessage;
 import org.communicationModels.Messages.RejectAssignmentMessage;
 import org.communicationModels.Messages.StatusMessage;
-import org.graphs.OrientedPoint;
-import org.graphs.RigidBodyTransformation;
+import org.graphs.util.OrientedPoint;
+import org.graphs.util.RigidBodyTransformation;
 import org.graphs.voltage.HalfEdge;
 import org.graphs.voltage.HexagonVoltageGraph;
+import org.graphs.voltage.OctagonSquareVoltageGraph;
 import org.graphs.voltage.Role;
 import org.graphs.voltage.VoltageGraph;
 import org.robots.GeometricCycleLatticeRobot;
@@ -56,9 +57,6 @@ public class CyclebuilderComms extends CommunicationSystem {
     private ArrayList<OutgoingMessageRecord> sentThisTick;
 
     //MAIN ALGORITHM STEPS
-    public CyclebuilderComms(GeometricCycleLatticeRobot self) {
-        this(self, HexagonVoltageGraph.build());
-    }
 
     public CyclebuilderComms(GeometricCycleLatticeRobot self, VoltageGraph graph) {
         this.graph = graph;
@@ -222,7 +220,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                             unableToDoAssignmentIDs.clear();
                             unableToDoAssignmentIDs.add(pm.getSenderId());
                             chainMemberList = pm.getChainList();
-                            log("-> assignment REJECTED by " + pm.getSenderId() + " (incoming chain list is larger)");
+                            log("-> Positioning Message from " + pm.getSenderId() + "(ACCEPTED, incoming chain list is larger)");
                             return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED, incoming chain list is larger)";
 
                         //If incoming list is smaller, we should wait for other to complete our task as it will override
@@ -231,9 +229,10 @@ public class CyclebuilderComms extends CommunicationSystem {
                             if(pm.getChainList().getRootID() == pm.getSenderId()) {
                                 forwardRejectionUpstream(pm, true);
                             }
-
+                            log("-> Positioning Message from " + pm.getSenderId() + "(REJECTED, incoming chain list is smaller)");
                             return "Positioning Message from " + pm.getSenderId() + "(REJECTED, incoming chain list is smaller)";
                         } else {
+                            //Accept message if root is smaller
                             if(pm.getChainList().getRootID() < chainMemberList.getRootID()) {
                                 forwardRejectionToParent(true);
                                 pendingChildID = -1;
@@ -241,9 +240,12 @@ public class CyclebuilderComms extends CommunicationSystem {
                                 setOriginEdge(pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
                                 unableToDoAssignmentIDs.add(pm.getSenderId());
                                 chainMemberList = pm.getChainList();
-                                log("-> assignment REJECTED by " + pm.getSenderId() + " (incoming root ID is smaller)");
+                                log("-> Positioning Message from " + pm.getSenderId() + "(ACCEPTED, incoming root ID is smaller");
                                 return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED, incoming root ID is smaller)";
+                            
+                            //Send rejection retryable if root is larger
                             } else {
+                                forwardRejectionUpstream(pm, true);
                                 return "Positioning Message from " + pm.getSenderId() + "(REJECTED, incoming root ID is larger)";
                             }
                         }
@@ -302,7 +304,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                             return "Positioning Message from " + pm.getSenderId() + "(REJECTED)";
 
                         } else {
-                            forwardRejectionUpstream(pm, false);
+                            forwardFailureUpstream(pm);
                             log("-> root received message from another root, but next edge's cycle is NOT complete, forwarding REJECTION upstream (NOT RETRYABLE)");
                             return "Positioning Message from " + pm.getSenderId() + "(REJECTED)";
                         }
@@ -460,6 +462,16 @@ public class CyclebuilderComms extends CommunicationSystem {
         send(parent, sm);
         reset();
     }
+
+    private void forwardFailureUpstream(PositioningMessage pm) {
+        GeometricCycleLatticeRobot parent = getNeighborByID(pm.getSenderId());
+        int originVertexID = pm.getOriginVertexID();
+        int originOutgoingEdgeID = pm.getOriginOutgoingEdgeID();
+
+        StatusMessage sm = new StatusMessage(self.getRobotId(), parent.getRobotId(), false, originVertexID, originOutgoingEdgeID);
+        send(parent, sm);
+    }
+
 
     private void forwardRejectionUpstream(PositioningMessage pm, boolean isRetryable) {
         RejectAssignmentMessage rm = new RejectAssignmentMessage(pm.getRecipient(), pm.getSenderId(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID(), isRetryable);

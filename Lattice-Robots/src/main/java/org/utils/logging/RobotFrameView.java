@@ -7,8 +7,8 @@ import com.darcarms.htmllog.Rect;
 import com.darcarms.htmllog.TransformTools;
 
 import org.communicationModels.Observation;
-import org.graphs.OrientedPoint;
-import org.graphs.RigidBodyTransformation;
+import org.graphs.util.OrientedPoint;
+import org.graphs.util.RigidBodyTransformation;
 
 import java.awt.BasicStroke;
 import java.awt.Color;

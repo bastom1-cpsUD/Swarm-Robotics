@@ -1,6 +1,6 @@
 package org.graphs.voltage;
 
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
 
 /**
  * The hexagon lattice as a VoltageGraph: two roles, three edges each, all

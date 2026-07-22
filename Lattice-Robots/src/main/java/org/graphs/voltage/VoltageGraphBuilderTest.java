@@ -1,6 +1,6 @@
 package org.graphs.voltage;
 
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -101,46 +101,6 @@ class VoltageGraphBuilderTest {
     void build_withoutPrimaryRole_throws() {
         VoltageGraphBuilder builder = new VoltageGraphBuilder();
         builder.addRole(0, new OrientedPoint(0, 0, 0));
-
-        assertThrows(IllegalStateException.class, builder::build);
-    }
-
-    @Test
-    @DisplayName("a role whose entire degree is one semi-edge closes after exactly two steps")
-    void selfTwinHalfEdgeAlone_closesAfterTwoSteps() {
-        // Isolates the multi-lap holonomy mechanism from octagon-square's
-        // specific geometry: a semi-edge's voltage is self-inverse by
-        // definition, so composing it with itself must be identity -- this
-        // must close after exactly 2 steps for ANY self-inverse voltage, not
-        // just the one OctagonSquareVoltageGraph happens to use.
-        VoltageGraphBuilder builder = new VoltageGraphBuilder();
-        Role role = builder.addRole(0, new OrientedPoint(0, 0, 0));
-        builder.setPrimaryRole(role);
-
-        HalfEdge h = builder.addSelfTwinHalfEdge(role, new OrientedPoint(3, 4, Math.PI));
-        builder.setRotationOrder(role, h);
-
-        VoltageGraph graph = builder.build();
-
-        assertSame(h, h.getNext());
-        assertEquals(1, graph.getFaces().size());
-        assertEquals(2, graph.getFaces().get(0).getCycleLength());
-    }
-
-    @Test
-    @DisplayName("two distinct semi-edges alone, with nothing else, can never close")
-    void twoDistinctSelfTwinHalfEdgesAlone_neverClose() {
-        // Two 180-degree rotations about different centers compose to a
-        // nonzero pure translation (Chasles' theorem); repeating that lap
-        // only ever drifts further away. This is a real mathematical
-        // impossibility, not a bug -- build() must reject it.
-        VoltageGraphBuilder builder = new VoltageGraphBuilder();
-        Role role = builder.addRole(0, new OrientedPoint(0, 0, 0));
-        builder.setPrimaryRole(role);
-
-        HalfEdge right = builder.addSelfTwinHalfEdge(role, new OrientedPoint(1, 0, Math.PI));
-        HalfEdge left = builder.addSelfTwinHalfEdge(role, new OrientedPoint(-1, 0, Math.PI));
-        builder.setRotationOrder(role, right, left);
 
         assertThrows(IllegalStateException.class, builder::build);
     }

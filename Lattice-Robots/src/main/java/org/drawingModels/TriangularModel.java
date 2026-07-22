@@ -1,7 +1,9 @@
 package org.drawingModels;
 
 import java.awt.Shape;
-import org.graphs.OrientedPoint;
+
+import org.graphs.util.OrientedPoint;
+
 import java.awt.Polygon;
 
 public class TriangularModel extends DrawingModel{

@@ -1,6 +1,6 @@
 package org.graphs.voltage;
 
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
 
 /**
  * The square lattice as a VoltageGraph: one role, four edges (RIGHT/UP/LEFT/DOWN),

@@ -1,6 +1,6 @@
 package org.graphs.voltage;
 
-import org.graphs.RigidBodyTransformation;
+import org.graphs.util.RigidBodyTransformation;
 
 /**
  * One directed half of a connection between two Role copies, labeled with the

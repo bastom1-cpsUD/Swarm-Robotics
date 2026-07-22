@@ -2,7 +2,7 @@ package org.drawingModels;
 
 import java.awt.Shape;
 
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
 
 /**
  * An abstract class representing a drawing model for robots. This class defines the structure for drawing models, which include a method to draw the model,

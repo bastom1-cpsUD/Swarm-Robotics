@@ -3,7 +3,7 @@ package org.robots;
 import java.awt.Shape;
 import org.drawingModels.Drawable;
 import org.drawingModels.DrawingModel;
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
 import org.motionModels.MotionModel;
 import org.motionModels.Movable;
 

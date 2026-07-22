@@ -2,8 +2,8 @@ package org.communicationModels;
 
 
 import org.robots.Robot;
-import org.graphs.OrientedPoint;
-import org.graphs.RigidBodyTransformation;
+import org.graphs.util.OrientedPoint;
+import org.graphs.util.RigidBodyTransformation;
 
 public class Observation {
     private int id;

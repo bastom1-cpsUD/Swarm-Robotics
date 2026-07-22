@@ -1,7 +1,5 @@
 package org.communicationModels.Messages;
 
-import org.graphs.LatticeEdge;
-
 public class PromotionMessage extends AbstractMessage {
     private int assignedVertexID;
     private int assignedOutgoingEdgeID;

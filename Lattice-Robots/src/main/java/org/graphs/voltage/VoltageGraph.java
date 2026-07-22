@@ -1,9 +1,9 @@
 package org.graphs.voltage;
 
-import org.graphs.RigidBodyTransformation;
-
 import java.util.List;
 import java.util.Map;
+
+import org.graphs.util.RigidBodyTransformation;
 
 /**
  * The finite quotient graph standing in for an infinite, periodic lattice: a

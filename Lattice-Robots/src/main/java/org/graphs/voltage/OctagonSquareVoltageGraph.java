@@ -1,6 +1,6 @@
 package org.graphs.voltage;
 
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
 
 /**
  * The octagon-square (4.8.8) lattice as a VoltageGraph: four roles, one per

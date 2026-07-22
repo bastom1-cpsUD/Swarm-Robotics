@@ -8,9 +8,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 
-import org.graphs.LatticeGraph;
-import org.graphs.OrientedPoint;
-import org.graphs.RigidBodyTransformation;
 import org.robots.LatticeRobot;
 import org.simulation.Edge;
 import org.utils.MathUtils;
@@ -18,11 +15,14 @@ import org.communicationModels.Observation;
 import org.communicationModels.TrustLevel;
 import org.communicationModels.HungarianAlgo.HungarianAlgo;
 import org.communicationModels.HungarianAlgo.HungarianMatrixUtils;
-import org.graphs.LatticeEdge;
-import org.graphs.SquareLattice;
-import org.graphs.Vertex;
+import org.graphs.lattice.LatticeEdge;
+import org.graphs.lattice.LatticeGraph;
+import org.graphs.lattice.SquareLattice;
+import org.graphs.lattice.Vertex;
+import org.graphs.util.OrientedPoint;
+import org.graphs.util.RigidBodyTransformation;
 import org.motionModels.TimeStepDiffDrive;
-import org.graphs.HexagonLattice;
+import org.graphs.lattice.HexagonLattice;
 
 /**
  * A Decentralized communication system based on the proposed methodology outlined in Song & OKane 2014

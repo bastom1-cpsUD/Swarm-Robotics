@@ -1,6 +1,6 @@
 package org.graphs.voltage;
 
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

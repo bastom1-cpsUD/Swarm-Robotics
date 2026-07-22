@@ -1,4 +1,4 @@
-package org.graphs;
+package org.graphs.util;
 
 import Jama.Matrix;
 

@@ -1,6 +1,6 @@
 package org.motionModels;
 
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
 import org.robots.LatticeRobot;
 
 public class ContinuousDiffDrive extends MotionModel {

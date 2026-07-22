@@ -1,6 +1,6 @@
 package org.motionModels;
 
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
 
 /**
  * An interface defining the required method for a moveable robot

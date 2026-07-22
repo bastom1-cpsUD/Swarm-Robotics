@@ -1,5 +1,6 @@
-package org.graphs;
+package org.graphs.lattice;
 
+import org.graphs.util.OrientedPoint;
 import java.util.ArrayList;
 
 public class HexagonLattice extends LatticeGraph {

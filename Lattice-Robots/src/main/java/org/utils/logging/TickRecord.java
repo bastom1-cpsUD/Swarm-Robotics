@@ -1,6 +1,6 @@
 package org.utils.logging;
 
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
 import org.graphs.voltage.HalfEdge;
 import org.utils.MathUtils;
 
