@@ -8,7 +8,10 @@ import org.graphs.util.OrientedPoint;
  * EDGE_LENGTH and poses as org.graphs.HexagonLattice. Neither role is an
  * endpoint of its own edges, so insertion order already matches true
  * rotation order -- no explicit setRotationOrder call is needed here, unlike
- * SquareVoltageGraph. See DCEL-Implementation-Plan.md sec 5 / primer sec 3, 7.
+ * SquareVoltageGraph. The edges are inserted in clockwise (decreasing
+ * departure angle: 60, 300, 180) order so every face traces clockwise,
+ * matching the other lattice graphs. See DCEL-Implementation-Plan.md sec 5 /
+ * primer sec 3, 7.
  */
 public final class HexagonVoltageGraph {
     private static final double EDGE_LENGTH = 50.0;
@@ -25,9 +28,9 @@ public final class HexagonVoltageGraph {
         Role v1 = builder.addRole(2, new OrientedPoint(EDGE_LENGTH * COS_60, EDGE_LENGTH * SIN_60, 0));
         builder.setPrimaryRole(v0);
 
-        builder.addHalfEdgePair(v0, v1, new OrientedPoint(-EDGE_LENGTH, 0, 0));                              // LEFT
-        builder.addHalfEdgePair(v0, v1, new OrientedPoint(EDGE_LENGTH * COS_60, -EDGE_LENGTH * SIN_60, 0));  // DOWN-RIGHT
         builder.addHalfEdgePair(v0, v1, new OrientedPoint(EDGE_LENGTH * COS_60, EDGE_LENGTH * SIN_60, 0));   // UP-RIGHT
+        builder.addHalfEdgePair(v0, v1, new OrientedPoint(EDGE_LENGTH * COS_60, -EDGE_LENGTH * SIN_60, 0));  // DOWN-RIGHT
+        builder.addHalfEdgePair(v0, v1, new OrientedPoint(-EDGE_LENGTH, 0, 0));                              // LEFT
 
         return builder.build();
     }

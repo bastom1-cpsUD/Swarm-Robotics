@@ -26,7 +26,10 @@ public final class SquareVoltageGraph {
         HalfEdge left = right.getTwin();
         HalfEdge down = up.getTwin();
 
-        builder.setRotationOrder(role, right, up, left, down);
+        // Clockwise rotation order (decreasing departure angle: 0, 270, 180, 90),
+        // matching the convention used across the other lattice graphs so every
+        // face traces clockwise.
+        builder.setRotationOrder(role, right, down, left, up);
 
         return builder.build();
     }
