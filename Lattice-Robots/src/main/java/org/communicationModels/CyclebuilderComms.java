@@ -497,8 +497,8 @@ public class CyclebuilderComms extends CommunicationSystem {
         // instead of (0, 0, 0) whenever self's orientation was nonzero).
         OrientedPoint positionInLocal = new OrientedPoint(0, 0, 0);
 
-        return MathUtils.approxEquals(localAssignment.x, positionInLocal.getX(), MathUtils.POSITION_EPSILON)
-                && MathUtils.approxEquals(localAssignment.y, positionInLocal.getY(), MathUtils.POSITION_EPSILON)
+        return MathUtils.approxEquals(localAssignment.x, positionInLocal.getX(), MathUtils.REASSIGNMENT_POSITION_EPSILON)
+                && MathUtils.approxEquals(localAssignment.y, positionInLocal.getY(), MathUtils.REASSIGNMENT_POSITION_EPSILON)
                 && MathUtils.isZero(MathUtils.angleDifference(localAssignment.getOrientation(), positionInLocal.getOrientation()));
     }
 
@@ -543,7 +543,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         Observation rootObs = observations.get(rootID);
         if (rootObs != null && !unableToDoAssignmentIDs.contains(rootID)) {
             double rootDistance = targetLocal.distance(rootObs.getLocalPosition());
-            if (MathUtils.isZero(rootDistance, MathUtils.POSITION_EPSILON)) {
+            if (MathUtils.isZero(rootDistance, MathUtils.EPSILON)) {
                 log("-> root is exactly at target position, closing cycle");
                 return getNeighborByID(rootID);
             }
@@ -551,24 +551,54 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         // Root excluded from here on — never lets a near-but-not-exact root suppress a real candidate
         ArrayList<Observation> validObservations = new ArrayList<>();
+        ArrayList<Observation> priorityObservations = new ArrayList<>();
         for (Observation obs : observations.values()) {
             int robotID = obs.getId();
             if (robotID != rootID && !chainMemberList.isInList(robotID) && !unableToDoAssignmentIDs.contains(robotID)) {
+                if(observationIsWithinFormingFace(obs, targetEdge)) priorityObservations.add(obs);
                 validObservations.add(obs);
             }
         }
 
         int bestNeighborID = -1;
         double smallestDistance = Double.MAX_VALUE;
+        
+        if(!priorityObservations.isEmpty()) {
+            validObservations = priorityObservations;
+        }
+
         for (Observation obs : validObservations) {
             double distance = targetLocal.distance(obs.getLocalPosition());
-            if (distance < smallestDistance) {
-                smallestDistance = distance;
-                bestNeighborID = obs.getId();
-            }
+                if (distance < smallestDistance) {
+                    smallestDistance = distance;
+                    bestNeighborID = obs.getId();
+                }
         }
 
         return getNeighborByID(bestNeighborID); // null if truly none — genuine dead end
+    }
+
+    private boolean observationIsWithinFormingFace(Observation obs, HalfEdge targetEdge) {
+        OrientedPoint p1 = new OrientedPoint(0,0,0);
+        OrientedPoint p2 = getTargetInLocalCoordinates(targetEdge);
+        OrientedPoint p3 = new OrientedPoint(obs.getLocalPosition());
+
+        //If observed robot is not clockwise from target, it its not within the forming face
+        if(!MathUtils.threePointClockwiseTest(p1, p2, p3)) return false;
+
+        //Vector from self to target
+        OrientedPoint v1 = p2;
+        //Vector from self to next target local pos
+        OrientedPoint v2 = MathUtils.vectorSum(v1, getTargetInLocalCoordinates(inferNextEdge(targetEdge)));
+
+        //Vector from target to candidate
+        OrientedPoint v3 = MathUtils.vectorBetween(p2, p3);
+        
+        
+        double theta = MathUtils.angleBetween(v1, v2);
+        double gamma = MathUtils.angleBetween(v1, v3);
+
+        return MathUtils.angleDifference(gamma, theta) > 0;
     }
 
     private OrientedPoint getTargetInLocalCoordinates(HalfEdge edge) {

@@ -12,10 +12,15 @@ import org.communicationModels.TrustLevel;
 import org.communicationModels.Messages.AbstractMessage;
 import org.drawingModels.TriangularModel;
 import org.graphs.util.OrientedPoint;
+import org.graphs.voltage.DodecagonHexagonSquareVoltageGraph;
 import org.graphs.voltage.DodecagonTriangleVoltageGraph;
+import org.graphs.voltage.ElongatedTriangularVoltageGraph;
+import org.graphs.voltage.HexagonSquareTriangleVoltageGraph;
 import org.graphs.voltage.HexagonTriangleVoltageGraph;
 import org.graphs.voltage.HexagonVoltageGraph;
 import org.graphs.voltage.OctagonSquareVoltageGraph;
+import org.graphs.voltage.SnubHexagonVoltageGraph;
+import org.graphs.voltage.SnubSquareVoltageGraph;
 import org.graphs.voltage.VoltageGraph;
 import org.utils.logging.CommsSnapshot;
 import org.utils.logging.TickRecord;
@@ -33,7 +38,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // Constants
     // ------------------------------------------------------------
     public static final double COMM_RANGE = 75.0;
-    public static final VoltageGraph GRAPH = DodecagonTriangleVoltageGraph.build();
+    public static final VoltageGraph GRAPH = HexagonVoltageGraph.build();
     // ------------------------------------------------------------
     // Fields
     // ------------------------------------------------------------
@@ -149,7 +154,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
                 OrientedPoint target = commsSystem.getAssignedGlobalPosition();
                 // 3. Broadcast logic (NEW API)
                 boolean atPos = (target != null
-                        && pose.distance(target) < MathUtils.POSITION_EPSILON)
+                        && pose.distance(target) < MathUtils.EPSILON)
                         && MathUtils.anglesEqual(pose.orientation, target.orientation);
 
                 if (atPos) {
