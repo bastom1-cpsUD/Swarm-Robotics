@@ -552,10 +552,14 @@ public class CyclebuilderComms extends CommunicationSystem {
         // Root excluded from here on — never lets a near-but-not-exact root suppress a real candidate
         ArrayList<Observation> validObservations = new ArrayList<>();
         ArrayList<Observation> priorityObservations = new ArrayList<>();
+
         for (Observation obs : observations.values()) {
             int robotID = obs.getId();
             if (robotID != rootID && !chainMemberList.isInList(robotID) && !unableToDoAssignmentIDs.contains(robotID)) {
-                if(observationIsWithinFormingFace(obs, targetEdge)) priorityObservations.add(obs);
+                if(observationIsWithinFormingFace(obs, targetEdge)) {
+                    priorityObservations.add(obs);
+                    log("Added robot " + obs.getId() + " to the priority selection");
+                } 
                 validObservations.add(obs);
             }
         }
@@ -589,7 +593,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         //Vector from self to target
         OrientedPoint v1 = p2;
         //Vector from self to next target local pos
-        OrientedPoint v2 = MathUtils.vectorSum(v1, getTargetInLocalCoordinates(inferNextEdge(targetEdge)));
+        OrientedPoint v2 = getTargetInLocalCoordinates(inferNextEdge(targetEdge));
 
         //Vector from target to candidate
         OrientedPoint v3 = MathUtils.vectorBetween(p2, p3);
