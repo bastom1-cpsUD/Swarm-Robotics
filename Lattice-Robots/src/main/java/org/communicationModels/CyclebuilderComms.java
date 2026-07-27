@@ -90,9 +90,20 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         RigidBodyTransformation globalToLocal = new RigidBodyTransformation(self.getPosition()).inverse();
         boolean childHasLeft = true;
+        OrientedPoint myAssignment = getAssignedLocalPosition();
         for(GeometricCycleLatticeRobot neighbor : neighbors) {
             if(neighbor.getRobotId() == pendingChildID) {
                 childHasLeft = false;
+            }
+            if(role == CycleRole.cycleBuilder) {
+                OrientedPoint neighborPosition = globalToLocal.apply(neighbor.getPosition());
+                if(MathUtils.isZero(myAssignment.distance(neighborPosition), MathUtils.EPSILON)) {
+                    forwardRejectionToParent(false);
+                    resetToUnassigned();
+                    hasBeenAssigned = false;
+                    self.clearEdges();
+                    log("-> Assignment already occupied. Forwarding rejection to parent.");
+                }
             }
             Observation obs = new Observation(neighbor, globalToLocal);
             observations.put(neighbor.getRobotId(), obs);
@@ -101,7 +112,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         if(childHasLeft && pendingChildID != -1) {
             log("-> child " + pendingChildID + " has left, clearing pendingChildID");
             removeEdgeToChild(pendingChildID);
-            pendingChildID = -1;
+            pendingChildID = -1; // HAS MUTATED STATE
         }
     }
 
@@ -126,6 +137,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         }
 
         AbstractMessage peek = incomingMessages.peek();
+
         // Root/stable must always accept a closing PositioningMessage — don't gate on pendingChildID
         boolean bypassPendingGate = (role == CycleRole.root || role == CycleRole.stable)
                 && (peek instanceof PositioningMessage || peek instanceof StatusMessage || peek instanceof RejectAssignmentMessage);
@@ -139,7 +151,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         log("Received " + next.getMessageType() + " from robot " + next.getSenderId());
 
         switch(role) {
-            case CycleRole.unassigned:
+            case unassigned:
                 if(next instanceof PositioningMessage pm) {
                     if(hasBeenAssigned) {
                         log("Checking for formation-breaking assignment...");
@@ -150,8 +162,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                         }
                     }
 
-                    role = CycleRole.cycleBuilder;
-                    hasBeenAssigned = true;
+                    resetToCycleBuilder();
                     setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
                     setOriginEdge(pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
                     unableToDoAssignmentIDs.add(pm.getSenderId());
@@ -163,8 +174,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                             + ", chain=" + chainMemberList.getIDList());
                     return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED)";
                 } else if(next instanceof PromotionMessage pm) {
-                    reset();
-                    role = CycleRole.root;
+                    resetToRoot();
                     stableID = pm.getSenderId();
                     setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
                     initializeEdgeMap();
@@ -176,25 +186,23 @@ public class CyclebuilderComms extends CommunicationSystem {
                 }
             case cycleBuilder:
                 if (next instanceof StatusMessage sm && sm.isSuccessful()) {
-                    pendingChildID = -1;
                     log("-> child reported SUCCESS, forwarding upstream");
                     forwardSuccessUpstream();
                     return "Status Message from " + sm.getSenderId() + "(SUCCESS)";
                 } else if (next instanceof StatusMessage sm && !sm.isSuccessful()) {
-                    pendingChildID = -1;
                     log("-> child reported FAILURE, forwarding upstream");
                     forwardFailureUpstream();
                     return "Status Message from " + sm.getSenderId() + "(FAILURE)";
                 } else if(next instanceof RejectAssignmentMessage rm) {
-                    pendingChildID = -1;
+                    pendingChildID = -1; // HAS MUTATED STATE
                     removeEdgeToChild(rm.getSenderId());
                     log("-> assignment REJECTED by " + rm.getSenderId());
                     if(rm.isRetryable()) {
                         forwardRejectionToParent(true);
-                        reset();
+                        resetToUnassigned();
                         log("-> assignment is retryable, will attempt to reassign");
                     } else {
-                        unableToDoAssignmentIDs.add(rm.getSenderId());
+                        unableToDoAssignmentIDs.add(rm.getSenderId()); // HAS MUTATED STATE (single-edge-scoped for cycleBuilder, unlike root's equivalent below)
                         log("-> assignment is NOT retryable, will not attempt to reassign");
                     }
                     return "Reject Assignment Message from " + rm.getSenderId() + "(REJECTED, " + (rm.isRetryable() ? "RETRYABLE)" : " NOT RETRYABLE)");
@@ -214,10 +222,9 @@ public class CyclebuilderComms extends CommunicationSystem {
                         //Check chain list to see who's list is larger, and if the incoming message has a larger list, we should accept it and send rejection to current parent with retryable
                         if(pm.getChainList().size() > chainMemberList.size()) {
                             forwardRejectionToParent(true);
-                            pendingChildID = -1;
+                            resetToCycleBuilder();
                             setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
                             setOriginEdge(pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
-                            unableToDoAssignmentIDs.clear();
                             unableToDoAssignmentIDs.add(pm.getSenderId());
                             chainMemberList = pm.getChainList();
                             log("-> Positioning Message from " + pm.getSenderId() + "(ACCEPTED, incoming chain list is larger)");
@@ -235,7 +242,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                             //Accept message if root is smaller
                             if(pm.getChainList().getRootID() < chainMemberList.getRootID()) {
                                 forwardRejectionToParent(true);
-                                pendingChildID = -1;
+                                resetToCycleBuilder();
                                 setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
                                 setOriginEdge(pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
                                 unableToDoAssignmentIDs.add(pm.getSenderId());
@@ -261,26 +268,26 @@ public class CyclebuilderComms extends CommunicationSystem {
                     log("-> cycleBuilder received unexpected message type: " + next.getMessageType());
                     return "N/A (Unhandled message type: " + next.getMessageType() + ")";
                 }
-            case CycleRole.root:
+            case root:
                 if(next instanceof StatusMessage sm) {
-                    pendingChildID = -1;
+                    resetToRoot();
                     if (sm.isSuccessful()) {
                         completedCycles.put(sm.getOriginOutgoingEdgeID(), true);
                         log("-> cycle on edge " + sm.getOriginOutgoingEdgeID() + " COMPLETED");
                         return "Status Message from " + sm.getSenderId() + "(SUCCESS)";
                     } else {
-                        hasFailed = true;
+                        hasFailed = true; // HAS MUTATED STATE
                         log("-> cycle on edge " + sm.getOriginOutgoingEdgeID() + " FAILED, ceasing operations");
                         return "Status Message from " + sm.getSenderId() + "(FAILURE)";
                     }
                 } else if(next instanceof RejectAssignmentMessage rm) {
-                    pendingChildID = -1;
+                    pendingChildID = -1; // HAS MUTATED STATE
                     removeEdgeToChild(rm.getSenderId());
                     log("-> assignment REJECTED by " + rm.getSenderId());
                     if(rm.isRetryable()) {
                         log("-> assignment is retryable, will attempt to reassign");
                     } else {
-                        unableToDoAssignmentIDs.add(rm.getSenderId());
+                        unableToDoAssignmentIDs.add(rm.getSenderId()); // HAS MUTATED STATE (mid-edge exclusion -- do NOT swap for resetToRoot() here, that would wipe the exclusion this same edge still needs on retry)
                         log("-> assignment is NOT retryable, will not attempt to reassign");
                     }
                     return "Reject Assignment Message from " + rm.getSenderId() + "(REJECTED, " + (rm.isRetryable() ? "RETRYABLE)" : " NOT RETRYABLE)");
@@ -316,14 +323,14 @@ public class CyclebuilderComms extends CommunicationSystem {
                     }
                 } else if(next instanceof PromotionMessage pm) {
                     //Neighbor promoted to stable, try again for cycle building
-                    hasFailed = false;
+                    resetToRoot();
                     log("-> root received Promotion Message from " + pm.getSenderId() + ", clearing hasFailed and will attempt to reassign");
                     return "Promotion Message from " + pm.getSenderId() + "(WILL ATTEMPT TO COMPLETE CYCLES)";
                 } else {
                     log("-> root received unexpected message type: " + next.getMessageType());
                     return "N/A (Unhandled message type: " + next.getMessageType() + ")";
                 }
-            case CycleRole.stable:
+            case stable:
                 if(next instanceof PositioningMessage pm) {
                     if(!checkAssignmentForCurrentPosition(pm)) {
                         forwardRejectionUpstream(pm, false);
@@ -394,7 +401,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                     pendingChildID = childToBuild.getRobotId(); // Wait for status
                 } else {
                     log("Ran out of options for cycles... Ceasing operations...");
-                    hasFailed = true;
+                    hasFailed = true; // HAS MUTATED STATE
                     return "Failed (No valid neighbors for cycle, ceasing operations)";
                 }
                 if(VERBOSE) {
@@ -444,10 +451,8 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     //MESSAGE-PROCESSING UTIL
     private void forwardSuccessUpstream() {
-        GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
-        StatusMessage sm = new StatusMessage(self.getRobotId(), parent.getRobotId(), true, originVertexID, originOutgoingEdgeID);
-        send(parent, sm);
-        reset();
+        forwardSuccessUpstream(chainMemberList.getSenderID(), originVertexID, assignedOutgoingEdgeID);
+        resetToUnassigned();
     }
 
     private void forwardSuccessUpstream(int parentId, int originVertexID, int originEdgeID) {
@@ -460,7 +465,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
         StatusMessage sm = new StatusMessage(self.getRobotId(), parent.getRobotId(), false, originVertexID, originOutgoingEdgeID);
         send(parent, sm);
-        reset();
+        resetToUnassigned();
     }
 
     private void forwardFailureUpstream(PositioningMessage pm) {
@@ -476,7 +481,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     private void forwardRejectionUpstream(PositioningMessage pm, boolean isRetryable) {
         RejectAssignmentMessage rm = new RejectAssignmentMessage(pm.getRecipient(), pm.getSenderId(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID(), isRetryable);
         GeometricCycleLatticeRobot robot = getNeighborByID(pm.getSenderId());
-        send(robot, rm);
+        if(!(robot == null)) send(robot, rm);
     }
 
     private void forwardRejectionToParent(boolean isRetryable) {
@@ -487,6 +492,9 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     private boolean checkAssignmentForCurrentPosition(PositioningMessage pm) {
         OrientedPoint localAssignment = getAssignedLocalPosition(pm);
+
+        if(localAssignment == null) return false;
+
         log("Assigned local position is: " + localAssignment);
 
         // Self, expressed in self's own frame, is always exactly the origin --
@@ -556,10 +564,22 @@ public class CyclebuilderComms extends CommunicationSystem {
         for (Observation obs : observations.values()) {
             int robotID = obs.getId();
             if (robotID != rootID && !chainMemberList.isInList(robotID) && !unableToDoAssignmentIDs.contains(robotID)) {
+                // A neighbor already sitting exactly at the target position must win outright,
+                // same as the root case above, and before the wedge test runs: that test's
+                // angle math is ill-conditioned right at zero distance (the target->candidate
+                // vector degenerates toward (0,0), so its angle is numerically meaningless),
+                // and this is exactly the case -- an already-placed neighbor from an adjoining
+                // face/edge -- that must be picked to avoid placing a duplicate robot on top
+                // of it.
+                if (MathUtils.isZero(targetLocal.distance(obs.getLocalPosition()), MathUtils.EPSILON)) {
+                    log("-> " + robotID + " is exactly at target position, closing onto existing neighbor");
+                    return getNeighborByID(robotID);
+                }
+
                 if(observationIsWithinFormingFace(obs, targetEdge)) {
                     priorityObservations.add(obs);
                     log("Added robot " + obs.getId() + " to the priority selection");
-                } 
+                }
                 validObservations.add(obs);
             }
         }
@@ -586,23 +606,39 @@ public class CyclebuilderComms extends CommunicationSystem {
         OrientedPoint p1 = new OrientedPoint(0,0,0);
         OrientedPoint p2 = getTargetInLocalCoordinates(targetEdge);
         OrientedPoint p3 = new OrientedPoint(obs.getLocalPosition());
+        OrientedPoint p4 = getTargetInLocalCoordinates(inferNextEdge(targetEdge));
 
+        int orientationOfEdges = MathUtils.threePointClockwiseCounterClockwiseTest(p1, p2, MathUtils.vectorSum(p2, p4));
+    
         //If observed robot is not clockwise from target, it its not within the forming face
-        if(!MathUtils.threePointClockwiseTest(p1, p2, p3)) return false;
+        if(Integer.signum(orientationOfEdges) !=  Integer.signum(MathUtils.threePointClockwiseCounterClockwiseTest(p1, p2, p3))) return false;
 
         //Vector from self to target
         OrientedPoint v1 = p2;
-        //Vector from self to next target local pos
+        // Vector from target to the next-next role (the "future edge"), i.e. nextEdge's
+        // own local translation. This is expressed in the *target role's* local frame,
+        // not self's, so comparing its angle directly against v1 (in self's frame) is
+        // only valid because every voltage graph in this codebase uses zero-rotation
+        // edges -- by design: a nonzero-rotation edge would require a robot to track
+        // accumulated orientation to infer its role, which this decentralized algorithm
+        // has no way to do, so that case will not occur. If it ever did, v2 would need
+        // to be rotated by targetEdge's rotation component before comparing it to v1.
         OrientedPoint v2 = getTargetInLocalCoordinates(inferNextEdge(targetEdge));
 
         //Vector from target to candidate
         OrientedPoint v3 = MathUtils.vectorBetween(p2, p3);
-        
-        
+
+
         double theta = MathUtils.angleBetween(v1, v2);
         double gamma = MathUtils.angleBetween(v1, v3);
 
-        return MathUtils.angleDifference(gamma, theta) > 0;
+        // threePointClockwiseTest above already guarantees gamma < 0 (cross(v1,v3) < 0
+        // <=> atan2(...) < 0), so the only remaining check is whether the candidate's
+        // angle hasn't swept past the future edge's angle yet -- i.e. gamma < theta,
+        // not gamma > theta. (Verified against square lattice: a candidate at the face
+        // center gave gamma=-135, theta=-90 and must be ACCEPTED; the old `> 0` check
+        // rejected it while accepting an out-of-face candidate.)
+        return MathUtils.angleDifference(gamma, theta) < 0;
     }
 
     private OrientedPoint getTargetInLocalCoordinates(HalfEdge edge) {
@@ -690,8 +726,8 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
     //STATE CHANGE UTIL
 
-    public void promoteToPriamaryRoot() {
-        role = CycleRole.root;
+    public void promoteToPrimaryRoot() {
+        role = CycleRole.root; // HAS MUTATED STATE (partial -- unlike the PromotionMessage path above, this touches nothing else: pendingChildID/chainMemberList/unableToDoAssignmentIDs/stableID are left as whatever they were)
         initializeEdgeMap();
 
     }
@@ -699,8 +735,6 @@ public class CyclebuilderComms extends CommunicationSystem {
     private void promoteSelfToStable() {
         role = CycleRole.stable;
         this.pendingChildID = -1;
-
-        //Add more stuff as needed
     }
 
     //ACCESSORS, MUTATORS, AND UTIL ----------------------------------------------------
@@ -731,12 +765,24 @@ public class CyclebuilderComms extends CommunicationSystem {
                 .apply(new OrientedPoint(0, 0, 0));
     }
 
+    private OrientedPoint getAssignedLocalPosition() {
+        OrientedPoint globalPos = getAssignedGlobalPosition();
+        if(globalPos == null) {
+            return new OrientedPoint(0,0,0);
+        }
+        return new RigidBodyTransformation(self.getPosition()).inverse().apply(globalPos);
+    }
+
     private OrientedPoint getAssignedLocalPosition(PositioningMessage pm) {
         HalfEdge assignedEdge = retrieveEdgeFromGraph(pm.getAssignedOutgoingEdgeID());
 
         if(assignedEdge == null) return null;
 
         GeometricCycleLatticeRobot parent = getNeighborByID(pm.getSenderId());
+
+        if(parent == null) {
+            return null;
+        }
 
         RigidBodyTransformation assignedGlobalTransform = globalTransformOf(parent.getPosition(), assignedEdge.getVoltage());
 
@@ -771,6 +817,80 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         this.originVertexID = -1;
         this.originOutgoingEdgeID = -1;
+    }
+
+    // --- Role-scoped resets (draft) -----------------------------------------
+    //
+    // Not called anywhere yet. Each one answers "what does a clean slate for
+    // role X look like" -- as opposed to reset() above, which is really
+    // "clean slate for unassigned" under a role-agnostic name. Every existing
+    // site in this file that partially mutates the same fields is marked
+    // "HAS MUTATED STATE" so it's easy to compare against what these would do
+    // and decide whether it should be swapped in.
+
+    /**
+     * Clean slate for "unassigned": stableID, pendingChildID, chainMemberList,
+     * unableToDoAssignmentIDs, and the assigned/origin edge references are all
+     * cleared, and role is set to unassigned. hasBeenAssigned is the one
+     * state-data field deliberately left untouched. Differs from the existing
+     * reset() above only in that it also clears stableID.
+     */
+    public void resetToUnassigned() {
+        this.stableID = -1;
+        this.pendingChildID = -1;
+        this.chainMemberList = new ChainMemberList();
+        this.role = CycleRole.unassigned;
+        this.unableToDoAssignmentIDs.clear();
+
+        this.assignedVertexID = -1;
+        this.assignedOutgoingEdgeID = -1;
+
+        this.originVertexID = -1;
+        this.originOutgoingEdgeID = -1;
+    }
+
+    /**
+     * Clean slate for "cycleBuilder": stableID, pendingChildID, chainMemberList,
+     * unableToDoAssignmentIDs, and both the assigned and origin edge references
+     * are cleared, and role is set to cycleBuilder. Meant to be immediately
+     * followed by setAssignedEdge/setOriginEdge and the caller's own
+     * chainMemberList/unableToDoAssignmentIDs setup, the same way the
+     * unassigned -> cycleBuilder PositioningMessage handling does today.
+     */
+    public void resetToCycleBuilder() {
+        this.stableID = -1;
+        this.pendingChildID = -1;
+        this.hasBeenAssigned = true;
+        this.chainMemberList = new ChainMemberList();
+        this.role = CycleRole.cycleBuilder;
+        this.unableToDoAssignmentIDs.clear();
+
+        this.assignedVertexID = -1;
+        this.assignedOutgoingEdgeID = -1;
+
+        this.originVertexID = -1;
+        this.originOutgoingEdgeID = -1;
+    }
+
+    /**
+     * Clean slate for a root moving on to its next outgoing edge: pendingChildID,
+     * chainMemberList, unableToDoAssignmentIDs, and the origin edge reference are
+     * cleared, role is (re-)set to root, and hasFailed is forced back to false.
+     * stableID and the assigned edge are deliberately left untouched -- they're
+     * the root's own identity/position in the graph, not per-edge state. Same
+     * reasoning excludes completedCycles entirely: it's the record of progress
+     * this reset exists to avoid corrupting.
+     */
+    public void resetToRoot() {
+        this.pendingChildID = -1;
+        this.chainMemberList = new ChainMemberList();
+        this.role = CycleRole.root;
+        this.unableToDoAssignmentIDs.clear();
+
+        this.originVertexID = -1;
+        this.originOutgoingEdgeID = -1;
+
+        this.hasFailed = false;
     }
 
     //LOGGING / SNAPSHOT SUPPORT ---------------------------------------------

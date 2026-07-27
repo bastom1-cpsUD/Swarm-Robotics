@@ -21,6 +21,7 @@ import org.graphs.voltage.HexagonVoltageGraph;
 import org.graphs.voltage.OctagonSquareVoltageGraph;
 import org.graphs.voltage.SnubHexagonVoltageGraph;
 import org.graphs.voltage.SnubSquareVoltageGraph;
+import org.graphs.voltage.SquareVoltageGraph;
 import org.graphs.voltage.VoltageGraph;
 import org.utils.logging.CommsSnapshot;
 import org.utils.logging.TickRecord;
@@ -38,7 +39,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // Constants
     // ------------------------------------------------------------
     public static final double COMM_RANGE = 75.0;
-    public static final VoltageGraph GRAPH = HexagonVoltageGraph.build();
+    public static final VoltageGraph GRAPH = SnubSquareVoltageGraph.build();
     // ------------------------------------------------------------
     // Fields
     // ------------------------------------------------------------
@@ -150,6 +151,8 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
                 // 1. Process incoming messages
                 processed = commsSystem.processMessages(tick);
 
+                commsSystem.makeObservations();
+
                 // 2. Ask comms system for current target
                 OrientedPoint target = commsSystem.getAssignedGlobalPosition();
                 // 3. Broadcast logic (NEW API)
@@ -166,9 +169,11 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
                 } else if (target != null) {
                     assignedPosition = new OrientedPoint(target);
                     isMovingToAssignedPosition = true;
+                } else {
+                    //No live assignment (e.g. we just became unassigned due target being occupied)
+                    assignedPosition = new OrientedPoint(pose);
+                    isMovingToAssignedPosition = false;
                 }
-
-                commsSystem.makeObservations();
 
                 action = commsSystem.broadcastMessage(atPos, tick);
             }
@@ -226,11 +231,11 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     }
 
     public void promoteToRoot() {
-        commsSystem.promoteToPriamaryRoot();
+        commsSystem.promoteToPrimaryRoot();
     }
 
     public void promoteToPrimaryRoot() {
-        commsSystem.promoteToPriamaryRoot();
+        commsSystem.promoteToPrimaryRoot();
     }
 
     public boolean isMovingToAssignedPosition() {

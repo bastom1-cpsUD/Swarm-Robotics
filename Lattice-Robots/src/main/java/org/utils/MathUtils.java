@@ -134,13 +134,19 @@ public final class MathUtils {
      * @param p1 the first point
      * @param p2 the second point
      * @param p3 the third point
-     * @return true if the points make a clockwise turn, false if points are co-linear or form a counterclockwise turn
+     * @return negative if counterclockwise, 0 if co-linear, positive if clockwise
      */
-    public static boolean threePointClockwiseTest(OrientedPoint p1, OrientedPoint p2, OrientedPoint p3) {
+    public static int threePointClockwiseCounterClockwiseTest(OrientedPoint p1, OrientedPoint p2, OrientedPoint p3) {
         OrientedPoint v1 = new OrientedPoint(p2.getX() - p1.getX(), p2.getY() - p1.getY(), 0);
         OrientedPoint v2 = new OrientedPoint(p3.getX() - p2.getX(), p3.getY() - p2.getY(), 0);
 
-        return -1 * crossProduct(v1, v2) > 0.0;
+        double sigma = -1 * crossProduct(v1, v2);
+
+        if(sigma == 0.0) {
+            return 0;
+        }
+
+        return sigma > 0.0 ? 1 : -1;
     }
 
     public static double angleBetween(OrientedPoint v1, OrientedPoint v2) {
@@ -148,7 +154,7 @@ public final class MathUtils {
     }
 
     public static OrientedPoint vectorSum(OrientedPoint v1, OrientedPoint v2) {
-        return new OrientedPoint(v1.getX() + v2.getX(), v2.getY() + v2.getY(), 0);
+        return new OrientedPoint(v1.getX() + v2.getX(), v1.getY() + v2.getY(), 0);
     }
 
     public static OrientedPoint vectorBetween(OrientedPoint p1, OrientedPoint p2) {
@@ -174,13 +180,13 @@ public final class MathUtils {
         OrientedPoint p4 = new OrientedPoint(-1, 5, 0);
         OrientedPoint p5 = new OrientedPoint(-2, -5, 0);
         
-        //Check if true for clockwise turn    
-        System.out.println(threePointClockwiseTest(p1, p2, p3));
+        //Check if positive for clockwise turn    
+        System.out.println(threePointClockwiseCounterClockwiseTest(p1, p2, p3));
 
-        //Check if false for counterclockwise turn
-        System.out.println(threePointClockwiseTest(p1, p2, p4));
+        //Check if negative for counterclockwise turn
+        System.out.println(threePointClockwiseCounterClockwiseTest(p1, p2, p4));
 
         //Check if false for colinear
-        System.out.println(threePointClockwiseTest(p1, p2, p5));
+        System.out.println(threePointClockwiseCounterClockwiseTest(p1, p2, p5));
     }
 }

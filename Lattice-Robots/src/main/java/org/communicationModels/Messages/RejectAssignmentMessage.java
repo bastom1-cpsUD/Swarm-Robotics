@@ -30,7 +30,7 @@ public class RejectAssignmentMessage extends AbstractMessage{
     }
 
     public int getPriority() {
-        return 3;
+        return 2;
     }
 
     @Override
