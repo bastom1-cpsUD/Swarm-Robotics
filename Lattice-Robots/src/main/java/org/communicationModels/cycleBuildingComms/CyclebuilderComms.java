@@ -11,6 +11,7 @@ import java.util.concurrent.PriorityBlockingQueue;
 import org.communicationModels.Observation;
 import org.communicationModels.TrustLevel;
 import org.communicationModels.cycleBuildingComms.Messages.AbstractMessage;
+import org.communicationModels.cycleBuildingComms.Messages.AttemptLaterMessage;
 import org.communicationModels.cycleBuildingComms.Messages.ChainMemberList;
 import org.communicationModels.cycleBuildingComms.Messages.PositioningMessage;
 import org.communicationModels.cycleBuildingComms.Messages.PromotionMessage;
@@ -19,8 +20,6 @@ import org.communicationModels.cycleBuildingComms.Messages.StatusMessage;
 import org.graphs.util.OrientedPoint;
 import org.graphs.util.RigidBodyTransformation;
 import org.graphs.voltage.HalfEdge;
-import org.graphs.voltage.HexagonVoltageGraph;
-import org.graphs.voltage.OctagonSquareVoltageGraph;
 import org.graphs.voltage.Role;
 import org.graphs.voltage.VoltageGraph;
 import org.robots.GeometricCycleLatticeRobot;
@@ -33,7 +32,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     private TrustLevel trust;
 
     private static final boolean VERBOSE = true;
-    private HashMap<Integer, Boolean> completedCycles;
+    private HashMap<Integer, CycleStatus> completedCycles;
     private final VoltageGraph graph;
 
     // State-Data
@@ -50,10 +49,9 @@ public class CyclebuilderComms extends CommunicationSystem {
     private int originVertexID;
     private int originOutgoingEdgeID;
 
-    private boolean hasFailed;
-
     // Time-Step Data
     private HashMap<Integer, Observation> observations;
+    private boolean waitThisTimeStep;
 
     // Logging / instrumentation support (see CommsSnapshot, org.logging package)
     private ArrayList<OutgoingMessageRecord> sentThisTick;
@@ -73,8 +71,8 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.observations = new HashMap<>();
         this.incomingMessages = new PriorityBlockingQueue<>();
         this.unableToDoAssignmentIDs = new ArrayList<>();
-        this.hasFailed = false;
         this.sentThisTick = new ArrayList<>();
+        this.waitThisTimeStep = false;
 
         assignedVertexID = -1;
         assignedOutgoingEdgeID = -1;
@@ -142,7 +140,7 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         // Root/stable must always accept a closing PositioningMessage — don't gate on pendingChildID
         boolean bypassPendingGate = (role == CycleRole.root || role == CycleRole.stable)
-                && (peek instanceof PositioningMessage || peek instanceof StatusMessage || peek instanceof RejectAssignmentMessage);
+                && (peek instanceof PositioningMessage || peek instanceof StatusMessage || peek instanceof RejectAssignmentMessage || peek instanceof AttemptLaterMessage);
 
         if (!bypassPendingGate && pendingChildID != -1 && peek.getSenderId() != pendingChildID) {
             incomingMessages.add(incomingMessages.poll());
@@ -274,11 +272,11 @@ public class CyclebuilderComms extends CommunicationSystem {
                 if(next instanceof StatusMessage sm) {
                     resetToRoot();
                     if (sm.isSuccessful()) {
-                        completedCycles.put(sm.getOriginOutgoingEdgeID(), true);
+                        setCycleStatusOf(sm.getOriginOutgoingEdgeID(), CycleStatus.complete);
                         log("-> cycle on edge " + sm.getOriginOutgoingEdgeID() + " COMPLETED");
                         return "Status Message from " + sm.getSenderId() + "(SUCCESS)";
                     } else {
-                        hasFailed = true; // HAS MUTATED STATE
+                        setCycleStatusOf(sm.getOriginOutgoingEdgeID(), CycleStatus.failed);
                         log("-> cycle on edge " + sm.getOriginOutgoingEdgeID() + " FAILED, ceasing operations");
                         return "Status Message from " + sm.getSenderId() + "(FAILURE)";
                     }
@@ -293,6 +291,14 @@ public class CyclebuilderComms extends CommunicationSystem {
                         log("-> assignment is NOT retryable, will not attempt to reassign");
                     }
                     return "Reject Assignment Message from " + rm.getSenderId() + "(REJECTED, " + (rm.isRetryable() ? "RETRYABLE)" : " NOT RETRYABLE)");
+                } else if(next instanceof AttemptLaterMessage am) {
+                    pendingChildID = -1;
+                    CycleStatus previousStatus = setCycleStatusOf(am.getOriginOutgoingEdgeID(), CycleStatus.attempted);
+                    if(previousStatus == CycleStatus.attempted) {
+                        waitThisTimeStep = true;
+                    }
+                    log("-> " + am.getSenderId() + " asked to attempt edge " + am.getOriginOutgoingEdgeID() + " later");
+                    return "Attempt Later Message from " + am.getSenderId() + "(DEFERRED)";
                 } else if(next instanceof PositioningMessage pm) {
                     if(!checkAssignmentForCurrentPosition(pm)) {
                         forwardRejectionUpstream(pm, false);
@@ -303,13 +309,13 @@ public class CyclebuilderComms extends CommunicationSystem {
                     } else if(pm.getChainList().getRootID() == pm.getSenderId()){
                         HalfEdge nextEdge = inferNextEdge(getAssignedEdgeFromMessage(pm));
 
-                        if(completedCycles.get(nextEdge.getId())) {
+                        if(completedCycles.get(nextEdge.getId()) == CycleStatus.complete) {
                             forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
                             log("-> root received message from another root, but next edge's cycle is complete, forwarding SUCCESS upstream");
                             return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED)";
                         } else if(!hasFailed()) {
-                            log("-> root received message from another root, but next edge's cycle is NOT complete, forwarding REJECTION upstream (RETRYABLE)");
-                            forwardRejectionUpstream(pm, true);
+                            log("-> root received message from another root, but next edge's cycle is NOT complete, forwarding ATTEMPT LATER upstream");
+                            forwardAttemptLaterUpstream(pm);
                             return "Positioning Message from " + pm.getSenderId() + "(REJECTED)";
 
                         } else {
@@ -371,21 +377,19 @@ public class CyclebuilderComms extends CommunicationSystem {
             case CycleRole.root: {
                 if(pendingChildID != -1) {
                     return "N/A (Waiting for Status Update to complete)";
-                } else if(hasFailed) {
+                } else if(hasFailed()) {
                     return "N/A (Ceased operations due to failure)";
+                } else if(waitThisTimeStep) {
+                    waitThisTimeStep = false;
+                    return "N/A (Waiting for timestep)";
                 }
                 log("Sending Message...");
 
                 // Find the first outgoing edge that doesn't have a completed cycle yet
-                int targetEdgeID = -1;
-                for (Entry<Integer, Boolean> entry : completedCycles.entrySet()) {
-                    if (!entry.getValue()) {
-                        targetEdgeID = entry.getKey();
-                        break;
-                    }
-                }
+                int targetEdgeID = determineNextCycleToComplete();
+                
 
-                if (targetEdgeID == -1) {
+                if (targetEdgeID == -1 && !hasFailed()) {
                     promoteAdjacentVerticesToRoots();
                     promoteSelfToStable();
                     return "Done (All cycles completed, promoted to stable)";
@@ -403,7 +407,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                     pendingChildID = childToBuild.getRobotId(); // Wait for status
                 } else {
                     log("Ran out of options for cycles... Ceasing operations...");
-                    hasFailed = true; // HAS MUTATED STATE
+                    setCycleStatusOf(targetEdgeID, CycleStatus.failed);
                     return "Failed (No valid neighbors for cycle, ceasing operations)";
                 }
                 if(VERBOSE) {
@@ -491,6 +495,12 @@ public class CyclebuilderComms extends CommunicationSystem {
         send(parent, rm);
     }
 
+    private void forwardAttemptLaterUpstream(PositioningMessage pm) {
+        AttemptLaterMessage am = new AttemptLaterMessage(pm.getRecipient(), pm.getSenderId(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
+        GeometricCycleLatticeRobot robot = getNeighborByID(pm.getSenderId());
+        send(robot,am);
+    }
+
     private boolean checkAssignmentForCurrentPosition(PositioningMessage pm) {
         OrientedPoint localAssignment = getAssignedLocalPosition(pm);
 
@@ -512,11 +522,31 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     //ROOT-RELATED UTIL
+    private int determineNextCycleToComplete() {
+        //Prioritize unattempted values first
+        for (Entry<Integer, CycleStatus> entry : completedCycles.entrySet()) {
+            CycleStatus status = entry.getValue();
+            if(status == CycleStatus.unattempted) {
+                return entry.getKey();
+            }
+        }
+
+        //Next, iterate through attempted cycles
+        for(Entry<Integer, CycleStatus> entry : completedCycles.entrySet()) {
+            CycleStatus status = entry.getValue();
+            if(status == CycleStatus.attempted) {
+                return entry.getKey();
+            }
+        }
+
+        return -1;
+    }
+
     private void initializeEdgeMap() {
         Role myRole = getCurrentRole();
         List<HalfEdge> edges = graph.getOutgoingHalfEdges(myRole);
         for(HalfEdge edge : edges) {
-            completedCycles.put(getEdgeIDof(edge), false);
+            completedCycles.put(getEdgeIDof(edge), CycleStatus.unattempted);
         }
     }
 
@@ -730,7 +760,27 @@ public class CyclebuilderComms extends CommunicationSystem {
     public TrustLevel  getTrustLevel()             { return trust; }
     public void        setTrustLevel(TrustLevel t) { this.trust = t; }
 
-    public boolean hasFailed() { return hasFailed; }
+    public CycleStatus getCycleStatusOf(int outgoingEdgeID) { return completedCycles.get(outgoingEdgeID); }
+    public CycleStatus setCycleStatusOf(int outgoingEdgeID, CycleStatus status) { return completedCycles.put(outgoingEdgeID, status);}
+    public void reattemptFailedCycles() {
+        for(Entry<Integer, CycleStatus> entry : completedCycles.entrySet()) {
+            if(entry.getValue() == CycleStatus.failed) {
+                setCycleStatusOf(entry.getKey(), CycleStatus.unattempted);
+            }
+        }
+    }
+    public boolean hasFailed() { 
+        int numOfCycleStillWorkingOn = 0;
+        int numOfFailedCycles = 0;
+        for(Entry<Integer, CycleStatus> entry : completedCycles.entrySet()) {
+            if(entry.getValue() == CycleStatus.attempted || entry.getValue() == CycleStatus.unattempted) {
+                numOfCycleStillWorkingOn++;
+            } else if (entry.getValue() == CycleStatus.failed){
+                numOfFailedCycles++;
+            }
+        }
+        return numOfCycleStillWorkingOn == 0 && numOfFailedCycles != 0;
+     }
 
     public OrientedPoint getAssignedGlobalPosition() {
         if (role == CycleRole.root || role == CycleRole.stable) {
@@ -873,7 +923,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.originVertexID = -1;
         this.originOutgoingEdgeID = -1;
 
-        this.hasFailed = false;
+        reattemptFailedCycles();
     }
 
     //LOGGING / SNAPSHOT SUPPORT ---------------------------------------------
@@ -905,7 +955,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         return new CommsSnapshot(
                 role,
                 trust,
-                hasFailed,
+                hasFailed(),
                 pendingChildID,
                 stableID,
                 chainMemberList,

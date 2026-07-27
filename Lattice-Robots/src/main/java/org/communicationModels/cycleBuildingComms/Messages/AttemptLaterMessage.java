@@ -1,15 +1,13 @@
 package org.communicationModels.cycleBuildingComms.Messages;
 
-public class RejectAssignmentMessage extends AbstractMessage{
+public class AttemptLaterMessage extends AbstractMessage{
     private int originVertexID;
     private int originOutgoingEdgeID;
-    private boolean isRetryable;
 
-    public RejectAssignmentMessage(int senderId, int recipient, int originVertexID, int originOutgoingEdgeID, boolean isRetryable) {
+    public AttemptLaterMessage(int senderId, int recipient, int originVertexID, int originOutgoingEdgeID) {
         super(senderId, recipient);
         this.originVertexID = originVertexID;
         this.originOutgoingEdgeID = originOutgoingEdgeID;
-        this.isRetryable = isRetryable;
     }
 
     public int getOriginVertexID() {
@@ -22,23 +20,18 @@ public class RejectAssignmentMessage extends AbstractMessage{
 
     /**{@inheritDoc}*/
     public String getMessageType() {
-        return "Rejection";
-    }
-
-    public boolean isRetryable() {
-        return isRetryable;
+        return "Attempt Later";
     }
 
     public int getPriority() {
-        return 1;
+        return 2;
     }
 
     @Override
     public String toString() {
         return super.toString() + "\n"
             + "Beginning Edge of Cycle Vertex ID: " + originVertexID + " \n"
-            + "Beginning Edge of Cycle Edge ID: " + originOutgoingEdgeID + "\n"
-            + "Retryable: " + isRetryable;
+            + "Beginning Edge of Cycle Edge ID: " + originOutgoingEdgeID;
     }
     
     @Override
@@ -49,19 +42,18 @@ public class RejectAssignmentMessage extends AbstractMessage{
         if(!super.equals(o)) {
             return false;
         }
-        if(!(o instanceof RejectAssignmentMessage)) {
+        if(!(o instanceof AttemptLaterMessage)) {
             return false;
         }
 
-        RejectAssignmentMessage other = (RejectAssignmentMessage) o;
+        AttemptLaterMessage other = (AttemptLaterMessage) o;
 
         return originVertexID == other.getOriginVertexID()
-            && originOutgoingEdgeID == other.getOriginOutgoingEdgeID()
-            && isRetryable == other.isRetryable();
+            && originOutgoingEdgeID == other.getOriginOutgoingEdgeID();
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(super.hashCode(), originVertexID, originOutgoingEdgeID, isRetryable);
+        return java.util.Objects.hash(super.hashCode(), originVertexID, originOutgoingEdgeID);
     }
 }

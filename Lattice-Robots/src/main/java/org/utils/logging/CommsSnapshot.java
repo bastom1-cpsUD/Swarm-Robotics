@@ -3,6 +3,7 @@ package org.utils.logging;
 import org.communicationModels.Observation;
 import org.communicationModels.TrustLevel;
 import org.communicationModels.cycleBuildingComms.CycleRole;
+import org.communicationModels.cycleBuildingComms.CycleStatus;
 import org.communicationModels.cycleBuildingComms.CyclebuilderComms;
 import org.communicationModels.cycleBuildingComms.Messages.AbstractMessage;
 import org.communicationModels.cycleBuildingComms.Messages.ChainMemberList;
@@ -34,7 +35,7 @@ public record CommsSnapshot(
         ChainMemberList chainMemberList,
         HalfEdge assignedEdge,
         HalfEdge originEdge,
-        Map<Integer, Boolean> completedCycles,
+        Map<Integer, CycleStatus> completedCycles,
         List<AbstractMessage> queueInOrder,
         Map<Integer, Observation> observations,
         List<Integer> unableToDoAssignmentIDs
