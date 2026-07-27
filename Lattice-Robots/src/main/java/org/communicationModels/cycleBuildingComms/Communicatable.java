@@ -1,6 +1,6 @@
-package org.communicationModels;
+package org.communicationModels.cycleBuildingComms;
 
-import org.communicationModels.Messages.AbstractMessage;
+import org.communicationModels.cycleBuildingComms.Messages.AbstractMessage;
 
 public interface Communicatable {
     

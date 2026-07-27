@@ -1,4 +1,4 @@
-package org.communicationModels.Messages;
+package org.communicationModels.cycleBuildingComms.Messages;
 
 /**
  * An abstract message template for messages that will be used within the lattice formation problem.

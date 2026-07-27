@@ -1,4 +1,4 @@
-package org.communicationModels.Messages;
+package org.communicationModels.cycleBuildingComms.Messages;
 
 public class RejectAssignmentMessage extends AbstractMessage{
     private int originVertexID;

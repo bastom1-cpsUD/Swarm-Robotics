@@ -1,4 +1,4 @@
-package org.communicationModels;
+package org.communicationModels.cycleBuildingComms;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -8,12 +8,14 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.PriorityBlockingQueue;
 
-import org.communicationModels.Messages.AbstractMessage;
-import org.communicationModels.Messages.ChainMemberList;
-import org.communicationModels.Messages.PositioningMessage;
-import org.communicationModels.Messages.PromotionMessage;
-import org.communicationModels.Messages.RejectAssignmentMessage;
-import org.communicationModels.Messages.StatusMessage;
+import org.communicationModels.Observation;
+import org.communicationModels.TrustLevel;
+import org.communicationModels.cycleBuildingComms.Messages.AbstractMessage;
+import org.communicationModels.cycleBuildingComms.Messages.ChainMemberList;
+import org.communicationModels.cycleBuildingComms.Messages.PositioningMessage;
+import org.communicationModels.cycleBuildingComms.Messages.PromotionMessage;
+import org.communicationModels.cycleBuildingComms.Messages.RejectAssignmentMessage;
+import org.communicationModels.cycleBuildingComms.Messages.StatusMessage;
 import org.graphs.util.OrientedPoint;
 import org.graphs.util.RigidBodyTransformation;
 import org.graphs.voltage.HalfEdge;
@@ -477,7 +479,6 @@ public class CyclebuilderComms extends CommunicationSystem {
         send(parent, sm);
     }
 
-
     private void forwardRejectionUpstream(PositioningMessage pm, boolean isRetryable) {
         RejectAssignmentMessage rm = new RejectAssignmentMessage(pm.getRecipient(), pm.getSenderId(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID(), isRetryable);
         GeometricCycleLatticeRobot robot = getNeighborByID(pm.getSenderId());
@@ -603,42 +604,30 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     private boolean observationIsWithinFormingFace(Observation obs, HalfEdge targetEdge) {
+        HalfEdge previousEdge = getAssignedEdge();
+        //If robot is without assignment, there is no previous edge and thus no formation restrictions
+        if(previousEdge == null) {
+            return false;
+        }
+        //Point of self
         OrientedPoint p1 = new OrientedPoint(0,0,0);
+        //Point of target
         OrientedPoint p2 = getTargetInLocalCoordinates(targetEdge);
+        //Point of candidate
         OrientedPoint p3 = new OrientedPoint(obs.getLocalPosition());
-        OrientedPoint p4 = getTargetInLocalCoordinates(inferNextEdge(targetEdge));
+        //Point of future target
+        OrientedPoint p4 = MathUtils.vectorSum(p2, getTargetInLocalCoordinates(inferNextEdge(targetEdge)));
+        //Point of parent
+        OrientedPoint p5 = getTargetInLocalCoordinates(getAssignedEdge().getTwin());
 
-        int orientationOfEdges = MathUtils.threePointClockwiseCounterClockwiseTest(p1, p2, MathUtils.vectorSum(p2, p4));
-    
-        //If observed robot is not clockwise from target, it its not within the forming face
-        if(Integer.signum(orientationOfEdges) !=  Integer.signum(MathUtils.threePointClockwiseCounterClockwiseTest(p1, p2, p3))) return false;
+        //Candidate orientation follows target and future target
+        int cycleOrientation1 = MathUtils.threePointClockwiseCounterClockwiseTest(p1, p2, p4);
+        //Candidate orientation follows self and target
+        int cycleOrientation2 = MathUtils.threePointClockwiseCounterClockwiseTest(p1, p2, p3);
+        //Candidate orientation follows parent and self
+        int cycleOrientation3 = MathUtils.threePointClockwiseCounterClockwiseTest(p5, p1, p3);
 
-        //Vector from self to target
-        OrientedPoint v1 = p2;
-        // Vector from target to the next-next role (the "future edge"), i.e. nextEdge's
-        // own local translation. This is expressed in the *target role's* local frame,
-        // not self's, so comparing its angle directly against v1 (in self's frame) is
-        // only valid because every voltage graph in this codebase uses zero-rotation
-        // edges -- by design: a nonzero-rotation edge would require a robot to track
-        // accumulated orientation to infer its role, which this decentralized algorithm
-        // has no way to do, so that case will not occur. If it ever did, v2 would need
-        // to be rotated by targetEdge's rotation component before comparing it to v1.
-        OrientedPoint v2 = getTargetInLocalCoordinates(inferNextEdge(targetEdge));
-
-        //Vector from target to candidate
-        OrientedPoint v3 = MathUtils.vectorBetween(p2, p3);
-
-
-        double theta = MathUtils.angleBetween(v1, v2);
-        double gamma = MathUtils.angleBetween(v1, v3);
-
-        // threePointClockwiseTest above already guarantees gamma < 0 (cross(v1,v3) < 0
-        // <=> atan2(...) < 0), so the only remaining check is whether the candidate's
-        // angle hasn't swept past the future edge's angle yet -- i.e. gamma < theta,
-        // not gamma > theta. (Verified against square lattice: a candidate at the face
-        // center gave gamma=-135, theta=-90 and must be ACCEPTED; the old `> 0` check
-        // rejected it while accepting an out-of-face candidate.)
-        return MathUtils.angleDifference(gamma, theta) < 0;
+        return Integer.signum(cycleOrientation1) == Integer.signum(cycleOrientation2) && Integer.signum(cycleOrientation1) == Integer.signum(cycleOrientation3);
     }
 
     private OrientedPoint getTargetInLocalCoordinates(HalfEdge edge) {
@@ -693,11 +682,6 @@ public class CyclebuilderComms extends CommunicationSystem {
         return retrieveEdgeFromGraph(originOutgoingEdgeID);
     }
 
-    // vertexID is still stored (see setAssignedEdge/setOriginEdge) so the
-    // wire format shared with PositioningMessage/PromotionMessage/etc. stays
-    // unchanged, but it's no longer needed for lookup: HalfEdge ids are
-    // globally unique (unlike the old per-vertex-local LatticeEdge ids), so
-    // edgeID alone identifies the edge.
     private HalfEdge retrieveEdgeFromGraph(int edgeID) {
         return graph.getHalfEdgeById(edgeID);
     }
@@ -724,7 +708,6 @@ public class CyclebuilderComms extends CommunicationSystem {
         if (childID == -1) return;
         self.getEdges().removeIf(edge -> edge.getToId() == childID);
     }
-    //STATE CHANGE UTIL
 
     public void promoteToPrimaryRoot() {
         role = CycleRole.root; // HAS MUTATED STATE (partial -- unlike the PromotionMessage path above, this touches nothing else: pendingChildID/chainMemberList/unableToDoAssignmentIDs/stableID are left as whatever they were)

@@ -5,11 +5,11 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-import org.communicationModels.Communicatable;
-import org.communicationModels.CycleRole;
-import org.communicationModels.CyclebuilderComms;
 import org.communicationModels.TrustLevel;
-import org.communicationModels.Messages.AbstractMessage;
+import org.communicationModels.cycleBuildingComms.Communicatable;
+import org.communicationModels.cycleBuildingComms.CycleRole;
+import org.communicationModels.cycleBuildingComms.CyclebuilderComms;
+import org.communicationModels.cycleBuildingComms.Messages.AbstractMessage;
 import org.drawingModels.TriangularModel;
 import org.graphs.util.OrientedPoint;
 import org.graphs.voltage.DodecagonHexagonSquareVoltageGraph;
@@ -39,7 +39,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // Constants
     // ------------------------------------------------------------
     public static final double COMM_RANGE = 75.0;
-    public static final VoltageGraph GRAPH = SnubSquareVoltageGraph.build();
+    public static final VoltageGraph GRAPH = HexagonVoltageGraph.build();
     // ------------------------------------------------------------
     // Fields
     // ------------------------------------------------------------

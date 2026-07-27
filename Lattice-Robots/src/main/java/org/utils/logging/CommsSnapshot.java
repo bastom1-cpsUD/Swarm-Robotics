@@ -1,11 +1,11 @@
 package org.utils.logging;
 
-import org.communicationModels.CycleRole;
-import org.communicationModels.CyclebuilderComms;
 import org.communicationModels.Observation;
 import org.communicationModels.TrustLevel;
-import org.communicationModels.Messages.AbstractMessage;
-import org.communicationModels.Messages.ChainMemberList;
+import org.communicationModels.cycleBuildingComms.CycleRole;
+import org.communicationModels.cycleBuildingComms.CyclebuilderComms;
+import org.communicationModels.cycleBuildingComms.Messages.AbstractMessage;
+import org.communicationModels.cycleBuildingComms.Messages.ChainMemberList;
 import org.graphs.voltage.HalfEdge;
 
 import java.util.List;

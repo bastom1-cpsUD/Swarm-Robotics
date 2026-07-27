@@ -1,4 +1,4 @@
-package org.communicationModels.Messages;
+package org.communicationModels.cycleBuildingComms.Messages;
 
 public class PromotionMessage extends AbstractMessage {
     private int assignedVertexID;

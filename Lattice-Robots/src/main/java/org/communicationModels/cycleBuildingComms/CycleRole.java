@@ -1,4 +1,4 @@
-package org.communicationModels;
+package org.communicationModels.cycleBuildingComms;
 
 public enum CycleRole {
     root,

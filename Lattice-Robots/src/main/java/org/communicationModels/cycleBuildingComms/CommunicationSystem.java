@@ -1,9 +1,9 @@
-package org.communicationModels;
+package org.communicationModels.cycleBuildingComms;
 
 import java.util.LinkedList;
 import java.util.Queue;
 
-import org.communicationModels.Messages.AbstractMessage;
+import org.communicationModels.cycleBuildingComms.Messages.AbstractMessage;
 
 public abstract class CommunicationSystem {
     protected Queue<AbstractMessage> incomingMessages;
