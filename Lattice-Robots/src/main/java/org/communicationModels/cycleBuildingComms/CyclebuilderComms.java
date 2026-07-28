@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.PriorityBlockingQueue;
 
 import org.communicationModels.Observation;
@@ -38,6 +39,12 @@ public class CyclebuilderComms extends CommunicationSystem {
     // State-Data
     private int stableID;
     private int pendingChildID;
+    // The exact Edge instance added when the pending offer was sent (see
+    // broadcastMessage's root/cycleBuilder cases). Removed by reference, not
+    // by toId, on rejection -- self.getEdges() can hold another, unrelated
+    // Edge to the same robot ID from an earlier, still-valid assignment, and
+    // a toId-based removeIf would wipe that one out too.
+    private Edge pendingChildEdge;
     private boolean hasBeenAssigned;
     private ChainMemberList chainMemberList;
     private GeometricCycleLatticeRobot self;
@@ -63,13 +70,14 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.trust = TrustLevel.Friendly;
         this.stableID = -1;
         this.pendingChildID = -1;
+        this.pendingChildEdge = null;
         this.hasBeenAssigned = false;
         this.chainMemberList = new ChainMemberList();
         this.role = CycleRole.unassigned;
         this.completedCycles = new HashMap<>();
         this.self = self;
         this.observations = new HashMap<>();
-        this.incomingMessages = new PriorityBlockingQueue<>();
+        this.incomingMessages = new ConcurrentLinkedQueue<>();
         this.unableToDoAssignmentIDs = new ArrayList<>();
         this.sentThisTick = new ArrayList<>();
         this.waitThisTimeStep = false;
@@ -111,7 +119,8 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         if(childHasLeft && pendingChildID != -1) {
             log("-> child " + pendingChildID + " has left, clearing pendingChildID");
-            removeEdgeToChild(pendingChildID);
+            self.getEdges().remove(pendingChildEdge);
+            pendingChildEdge = null;
             pendingChildID = -1; // HAS MUTATED STATE
         }
     }
@@ -320,18 +329,26 @@ public class CyclebuilderComms extends CommunicationSystem {
 
                         } else {
                             forwardFailureUpstream(pm);
-                            log("-> root received message from another root, but next edge's cycle is NOT complete, forwarding REJECTION upstream (NOT RETRYABLE)");
+                            log("-> root received message from another root, but next edge's cycle is NOT complete, forwarding FAILURE upstream (NOT RETRYABLE)");
                             return "Positioning Message from " + pm.getSenderId() + "(REJECTED)";
                         }
 
                     } else {
                         log("-> reached root, reporting SUCCESS, forwarding upstream");
+                        //If new robot appears in vicinity and claims part of a cycle, retry that cycle if it was earlier deemed failed
+                        HalfEdge incomingEdge = retrieveEdgeFromGraph(pm.getAssignedOutgoingEdgeID());
+                        int outgoingEquivelentID = incomingEdge.getTwin().getId();
+                        if(completedCycles.get(outgoingEquivelentID) != CycleStatus.complete) {
+                            setCycleStatusOf(outgoingEquivelentID, CycleStatus.unattempted);
+                        }
+                        self.addEdge(new Edge(pm.getRecipient(), pm.getSenderId()));
                     forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
                     return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED)";
                     }
                 } else if(next instanceof PromotionMessage pm) {
                     //Neighbor promoted to stable, try again for cycle building
                     resetToRoot();
+                    reattemptFailedCycles();
                     log("-> root received Promotion Message from " + pm.getSenderId() + ", clearing hasFailed and will attempt to reassign");
                     return "Promotion Message from " + pm.getSenderId() + "(WILL ATTEMPT TO COMPLETE CYCLES)";
                 } else {
@@ -403,7 +420,8 @@ public class CyclebuilderComms extends CommunicationSystem {
                 if (childToBuild != null) {
                     PositioningMessage pm = new PositioningMessage(self.getRobotId(), childToBuild.getRobotId(), getVertexIDof(targetEdge), getEdgeIDof(targetEdge), getVertexIDof(targetEdge), getEdgeIDof(targetEdge), chainList);
                     send(childToBuild, pm);
-                    self.addEdge(new Edge(self.getRobotId(), childToBuild.getRobotId()));
+                    pendingChildEdge = new Edge(self.getRobotId(), childToBuild.getRobotId());
+                    self.addEdge(pendingChildEdge);
                     pendingChildID = childToBuild.getRobotId(); // Wait for status
                 } else {
                     log("Ran out of options for cycles... Ceasing operations...");
@@ -435,16 +453,14 @@ public class CyclebuilderComms extends CommunicationSystem {
                     log("-> NO candidate found, forwarding FAILURE upstream");
                     forwardFailureUpstream();
                     return "Reporting Failure (No candidate found)";
-                } else if(child.getRobotId() == chainMemberList.getRootID()) {
-                    log("-> Succesffuly found root, closing chain");
-                    forwardSuccessUpstream();
-                    return "Reporting Success (Found root, closing chain)";
-                }
+                } 
+                //ADD BACK HERE
                 log("-> assigning robot " + child.getRobotId() + " to edge " + targetEdge.getId());
                 ChainMemberList childChainList = new ChainMemberList(chainMemberList, self.getRobotId());
                 PositioningMessage pm = new PositioningMessage(self.getRobotId(), child.getRobotId(), getVertexIDof(targetEdge), getEdgeIDof(targetEdge), originVertexID, originOutgoingEdgeID, childChainList);
                 send(child, pm);
-                self.addEdge(new Edge(self.getRobotId(), child.getRobotId()));
+                pendingChildEdge = new Edge(self.getRobotId(), child.getRobotId());
+                self.addEdge(pendingChildEdge);
                 pendingChildID = child.getRobotId();
                 return "Assigned position to robot " + child.getRobotId() + " for edge " + targetEdge.getId() + " of vertex " + targetEdge.getOrigin().getId();
             }
@@ -499,26 +515,6 @@ public class CyclebuilderComms extends CommunicationSystem {
         AttemptLaterMessage am = new AttemptLaterMessage(pm.getRecipient(), pm.getSenderId(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
         GeometricCycleLatticeRobot robot = getNeighborByID(pm.getSenderId());
         send(robot,am);
-    }
-
-    private boolean checkAssignmentForCurrentPosition(PositioningMessage pm) {
-        OrientedPoint localAssignment = getAssignedLocalPosition(pm);
-
-        if(localAssignment == null) return false;
-
-        log("Assigned local position is: " + localAssignment);
-
-        // Self, expressed in self's own frame, is always exactly the origin --
-        // not just approximately so for zero-rotation edges, as computing it
-        // via RigidBodyTransformation(self).inverse().apply(self) would give
-        // (RigidBodyTransformation.apply() discards the input point's own
-        // orientation, so that formula silently returned (0, 0, -selfOrientation)
-        // instead of (0, 0, 0) whenever self's orientation was nonzero).
-        OrientedPoint positionInLocal = new OrientedPoint(0, 0, 0);
-
-        return MathUtils.approxEquals(localAssignment.x, positionInLocal.getX(), MathUtils.REASSIGNMENT_POSITION_EPSILON)
-                && MathUtils.approxEquals(localAssignment.y, positionInLocal.getY(), MathUtils.REASSIGNMENT_POSITION_EPSILON)
-                && MathUtils.isZero(MathUtils.angleDifference(localAssignment.getOrientation(), positionInLocal.getOrientation()));
     }
 
     //ROOT-RELATED UTIL
@@ -664,6 +660,26 @@ public class CyclebuilderComms extends CommunicationSystem {
         return edge.getVoltage().apply(new OrientedPoint(0, 0, 0));
     }
 
+    private boolean checkAssignmentForCurrentPosition(PositioningMessage pm) {
+        OrientedPoint localAssignment = getAssignedLocalPosition(pm);
+
+        if(localAssignment == null) return false;
+
+        log("Assigned local position is: " + localAssignment);
+
+        // Self, expressed in self's own frame, is always exactly the origin --
+        // not just approximately so for zero-rotation edges, as computing it
+        // via RigidBodyTransformation(self).inverse().apply(self) would give
+        // (RigidBodyTransformation.apply() discards the input point's own
+        // orientation, so that formula silently returned (0, 0, -selfOrientation)
+        // instead of (0, 0, 0) whenever self's orientation was nonzero).
+        OrientedPoint positionInLocal = new OrientedPoint(0, 0, 0);
+
+        return MathUtils.approxEquals(localAssignment.x, positionInLocal.getX(), MathUtils.REASSIGNMENT_POSITION_EPSILON)
+                && MathUtils.approxEquals(localAssignment.y, positionInLocal.getY(), MathUtils.REASSIGNMENT_POSITION_EPSILON)
+                && MathUtils.isZero(MathUtils.angleDifference(localAssignment.getOrientation(), positionInLocal.getOrientation()));
+    }
+
     /**
      * EDGE AND ROLE UTIL
      */
@@ -736,7 +752,13 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     private void removeEdgeToChild(int childID) {
         if (childID == -1) return;
-        self.getEdges().removeIf(edge -> edge.getToId() == childID);
+        // Reference removal, not toId match: only undoes the specific
+        // speculative edge for this rejected offer, leaving any other
+        // (already-valid) edge to the same robot ID untouched.
+        if (pendingChildEdge != null && pendingChildEdge.getToId() == childID) {
+            self.getEdges().remove(pendingChildEdge);
+        }
+        pendingChildEdge = null;
     }
 
     public void promoteToPrimaryRoot() {
@@ -748,6 +770,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     private void promoteSelfToStable() {
         role = CycleRole.stable;
         this.pendingChildID = -1;
+        this.pendingChildEdge = null;
     }
 
     //ACCESSORS, MUTATORS, AND UTIL ----------------------------------------------------
@@ -840,6 +863,7 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     public void reset() {
         this.pendingChildID = -1;
+        this.pendingChildEdge = null;
         this.chainMemberList = new ChainMemberList();
         this.role = CycleRole.unassigned;
         this.observations = new HashMap<>();
@@ -871,6 +895,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     public void resetToUnassigned() {
         this.stableID = -1;
         this.pendingChildID = -1;
+        this.pendingChildEdge = null;
         this.chainMemberList = new ChainMemberList();
         this.role = CycleRole.unassigned;
         this.unableToDoAssignmentIDs.clear();
@@ -893,6 +918,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     public void resetToCycleBuilder() {
         this.stableID = -1;
         this.pendingChildID = -1;
+        this.pendingChildEdge = null;
         this.hasBeenAssigned = true;
         this.chainMemberList = new ChainMemberList();
         this.role = CycleRole.cycleBuilder;
@@ -916,14 +942,13 @@ public class CyclebuilderComms extends CommunicationSystem {
      */
     public void resetToRoot() {
         this.pendingChildID = -1;
+        this.pendingChildEdge = null;
         this.chainMemberList = new ChainMemberList();
         this.role = CycleRole.root;
         this.unableToDoAssignmentIDs.clear();
 
         this.originVertexID = -1;
         this.originOutgoingEdgeID = -1;
-
-        reattemptFailedCycles();
     }
 
     //LOGGING / SNAPSHOT SUPPORT ---------------------------------------------
@@ -972,7 +997,6 @@ public class CyclebuilderComms extends CommunicationSystem {
         // PriorityBlockingQueue's own iterator makes no ordering guarantee,
         // so copy out and sort a snapshot instead of trusting iteration order.
         List<AbstractMessage> copy = new ArrayList<>(incomingMessages);
-        Collections.sort(copy);
         return copy;
     }
 

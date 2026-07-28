@@ -15,7 +15,7 @@ import org.graphs.util.OrientedPoint;
  * every face's holonomy closes to the identity.
  */
 public final class SnubSquareVoltageGraph {
-    private static final double EDGE_LENGTH = 50.0;
+    private static final double EDGE_LENGTH = 70.0;
 
     private SnubSquareVoltageGraph() {
     }

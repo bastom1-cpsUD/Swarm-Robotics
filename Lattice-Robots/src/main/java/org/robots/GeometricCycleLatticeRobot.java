@@ -39,7 +39,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // Constants
     // ------------------------------------------------------------
     public static final double COMM_RANGE = 75.0;
-    public static final VoltageGraph GRAPH = HexagonVoltageGraph.build();
+    public static final VoltageGraph GRAPH = SnubSquareVoltageGraph.build();
     // ------------------------------------------------------------
     // Fields
     // ------------------------------------------------------------
@@ -90,7 +90,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // ------------------------------------------------------------
     // Edge visualization
     // ------------------------------------------------------------
-    public void addEdge(Edge e) { edges.add(e); }
+    public void addEdge(Edge e) { if(!edges.contains(e)) edges.add(e); }
     public void clearEdges() { edges.clear(); }
     public CopyOnWriteArrayList<Edge> getEdges() { return edges; }
 
