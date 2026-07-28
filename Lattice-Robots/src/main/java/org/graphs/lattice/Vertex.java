@@ -1,4 +1,6 @@
-package org.graphs;
+package org.graphs.lattice;
+
+import org.graphs.util.OrientedPoint;
 
 public class Vertex {
     /**

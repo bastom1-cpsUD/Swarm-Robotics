@@ -1,4 +1,4 @@
-package org.communicationModels.Messages;
+package org.communicationModels.cycleBuildingComms.Messages;
 
 public class PositioningMessage extends AbstractMessage {
     private ChainMemberList chainList;
@@ -60,7 +60,7 @@ public class PositioningMessage extends AbstractMessage {
     }
 
     public int getPriority() {
-        return 2;
+        return 3;
     }
 
     /**

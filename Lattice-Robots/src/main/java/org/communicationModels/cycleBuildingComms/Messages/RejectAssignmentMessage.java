@@ -1,4 +1,4 @@
-package org.communicationModels.Messages;
+package org.communicationModels.cycleBuildingComms.Messages;
 
 public class RejectAssignmentMessage extends AbstractMessage{
     private int originVertexID;
@@ -30,7 +30,7 @@ public class RejectAssignmentMessage extends AbstractMessage{
     }
 
     public int getPriority() {
-        return 3;
+        return 1;
     }
 
     @Override

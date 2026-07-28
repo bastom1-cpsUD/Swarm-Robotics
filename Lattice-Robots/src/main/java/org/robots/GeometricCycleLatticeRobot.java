@@ -5,15 +5,24 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-import org.communicationModels.Communicatable;
-import org.communicationModels.CycleRole;
-import org.communicationModels.CyclebuilderComms;
 import org.communicationModels.TrustLevel;
-import org.communicationModels.Messages.AbstractMessage;
+import org.communicationModels.cycleBuildingComms.Communicatable;
+import org.communicationModels.cycleBuildingComms.CycleRole;
+import org.communicationModels.cycleBuildingComms.CyclebuilderComms;
+import org.communicationModels.cycleBuildingComms.Messages.AbstractMessage;
 import org.drawingModels.TriangularModel;
-import org.graphs.HexagonLattice;
-import org.graphs.LatticeGraph;
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
+import org.graphs.voltage.DodecagonHexagonSquareVoltageGraph;
+import org.graphs.voltage.DodecagonTriangleVoltageGraph;
+import org.graphs.voltage.ElongatedTriangularVoltageGraph;
+import org.graphs.voltage.HexagonSquareTriangleVoltageGraph;
+import org.graphs.voltage.HexagonTriangleVoltageGraph;
+import org.graphs.voltage.HexagonVoltageGraph;
+import org.graphs.voltage.OctagonSquareVoltageGraph;
+import org.graphs.voltage.SnubHexagonVoltageGraph;
+import org.graphs.voltage.SnubSquareVoltageGraph;
+import org.graphs.voltage.SquareVoltageGraph;
+import org.graphs.voltage.VoltageGraph;
 import org.utils.logging.CommsSnapshot;
 import org.utils.logging.TickRecord;
 import org.motionModels.LatticeMotionModel;
@@ -30,7 +39,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // Constants
     // ------------------------------------------------------------
     public static final double COMM_RANGE = 75.0;
-
+    public static final VoltageGraph GRAPH = SnubSquareVoltageGraph.build();
     // ------------------------------------------------------------
     // Fields
     // ------------------------------------------------------------
@@ -47,16 +56,11 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // Constructor
     // ------------------------------------------------------------
     public GeometricCycleLatticeRobot(int id, OrientedPoint pose) {
-        this(id, pose, new HexagonLattice());
-    }
-
-    public GeometricCycleLatticeRobot(int id, OrientedPoint pose, LatticeGraph graph) {
         super(id, pose, new TimeStepDiffDrive(), new TriangularModel());
 
         this.latticeMotionModel = (LatticeMotionModel) motionModel;
 
-        // NEW comms system (no graph passed in anymore)
-        this.commsSystem = new CyclebuilderComms(this);
+        this.commsSystem = new CyclebuilderComms(this, GRAPH);
 
         this.edges = new CopyOnWriteArrayList<>();
         this.neighbors = new ArrayList<>();
@@ -86,7 +90,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // ------------------------------------------------------------
     // Edge visualization
     // ------------------------------------------------------------
-    public void addEdge(Edge e) { edges.add(e); }
+    public void addEdge(Edge e) { if(!edges.contains(e)) edges.add(e); }
     public void clearEdges() { edges.clear(); }
     public CopyOnWriteArrayList<Edge> getEdges() { return edges; }
 
@@ -147,11 +151,13 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
                 // 1. Process incoming messages
                 processed = commsSystem.processMessages(tick);
 
+                commsSystem.makeObservations();
+
                 // 2. Ask comms system for current target
                 OrientedPoint target = commsSystem.getAssignedGlobalPosition();
                 // 3. Broadcast logic (NEW API)
                 boolean atPos = (target != null
-                        && pose.distance(target) < MathUtils.POSITION_EPSILON)
+                        && pose.distance(target) < MathUtils.EPSILON)
                         && MathUtils.anglesEqual(pose.orientation, target.orientation);
 
                 if (atPos) {
@@ -163,9 +169,11 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
                 } else if (target != null) {
                     assignedPosition = new OrientedPoint(target);
                     isMovingToAssignedPosition = true;
+                } else {
+                    //No live assignment (e.g. we just became unassigned due target being occupied)
+                    assignedPosition = new OrientedPoint(pose);
+                    isMovingToAssignedPosition = false;
                 }
-
-                commsSystem.makeObservations();
 
                 action = commsSystem.broadcastMessage(atPos, tick);
             }
@@ -223,11 +231,11 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     }
 
     public void promoteToRoot() {
-        commsSystem.promoteToPriamaryRoot();
+        commsSystem.promoteToPrimaryRoot();
     }
 
     public void promoteToPrimaryRoot() {
-        commsSystem.promoteToPriamaryRoot();
+        commsSystem.promoteToPrimaryRoot();
     }
 
     public boolean isMovingToAssignedPosition() {

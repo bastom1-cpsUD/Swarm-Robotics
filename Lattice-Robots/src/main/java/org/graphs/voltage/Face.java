@@ -1,9 +1,9 @@
 package org.graphs.voltage;
 
-import org.graphs.RigidBodyTransformation;
-
 import java.util.ArrayList;
 import java.util.List;
+
+import org.graphs.util.RigidBodyTransformation;
 
 /**
  * A closed orbit of getNext() -- the loop traced by starting at any boundary

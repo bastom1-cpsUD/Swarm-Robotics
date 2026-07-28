@@ -2,8 +2,6 @@ package org.utils.logging;
 
 import com.darcarms.htmllog.HtmlLog;
 
-import org.graphs.OrientedPoint;
-
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -11,6 +9,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import org.graphs.util.OrientedPoint;
 
 /**
  * Owns the {@link HtmlLog} instance for one simulation run and turns

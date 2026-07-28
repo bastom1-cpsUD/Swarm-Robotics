@@ -1,4 +1,4 @@
-package org.graphs;
+package org.graphs.lattice;
 
 import java.lang.reflect.Array;
 import java.util.ArrayList;

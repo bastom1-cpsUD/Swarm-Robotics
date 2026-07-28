@@ -1,6 +1,4 @@
-package org.communicationModels.Messages;
-
-import org.graphs.LatticeEdge;
+package org.communicationModels.cycleBuildingComms.Messages;
 
 public class PromotionMessage extends AbstractMessage {
     private int assignedVertexID;

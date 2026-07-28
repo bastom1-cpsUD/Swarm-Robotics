@@ -1,6 +1,6 @@
 package org.motionModels;
 
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
 
 public abstract class MotionModel {
     /**

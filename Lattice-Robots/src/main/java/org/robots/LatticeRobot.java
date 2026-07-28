@@ -7,8 +7,7 @@ import org.communicationModels.SongOkaneComms.Communicatable;
 import org.communicationModels.SongOkaneComms.DecentralizedComms;
 import org.communicationModels.SongOkaneComms.Message;
 import org.drawingModels.TriangularModel;
-
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
 import org.motionModels.LatticeMotionModel;
 import org.motionModels.TimeStepDiffDrive;
 import org.simulation.Edge;

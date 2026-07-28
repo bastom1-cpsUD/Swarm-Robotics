@@ -1,7 +1,7 @@
 package org.utils.logging;
 
-import org.graphs.LatticeEdge;
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
+import org.graphs.voltage.HalfEdge;
 import org.utils.MathUtils;
 
 import java.util.List;
@@ -32,7 +32,7 @@ public record TickRecord(
      * Whether anything worth logging actually happened this tick.
      *
      * <p>Deliberately avoids relying on {@code equals()} for domain types
-     * whose equality semantics aren't guaranteed (e.g. {@link LatticeEdge}
+     * whose equality semantics aren't guaranteed (e.g. {@link HalfEdge}
      * instances are re-looked-up from the graph on every call and may not
      * override {@code equals}/{@code hashCode}); compares by the specific
      * identifying fields instead.</p>
@@ -50,11 +50,13 @@ public record TickRecord(
                 || !sent.isEmpty();
     }
 
-    private static boolean sameEdge(LatticeEdge a, LatticeEdge b) {
-        if (a.isNull() || b.isNull()) {
-            return a.isNull() == b.isNull();
+    private static boolean sameEdge(HalfEdge a, HalfEdge b) {
+        if (a == null || b == null) {
+            return a == b;
         }
-        return a.getId() == b.getId() && a.getFrom().getId() == b.getFrom().getId();
+        // HalfEdge ids are globally unique, unlike the old per-vertex-local
+        // LatticeEdge ids, so id equality alone is sufficient here.
+        return a.getId() == b.getId();
     }
 
     private static boolean samePose(OrientedPoint a, OrientedPoint b) {

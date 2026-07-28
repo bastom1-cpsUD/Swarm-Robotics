@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.communicationModels.TrustLevel;
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
 import org.robots.GeometricCycleLatticeRobot;
 import org.simulation.Edge;
 

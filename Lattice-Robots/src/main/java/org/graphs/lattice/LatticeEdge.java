@@ -1,4 +1,6 @@
-package org.graphs;
+package org.graphs.lattice;
+
+import org.graphs.util.*;
 /**
  * A class representing a directed edge in a lattice graph, connecting two vertices and labeled with a rigid body transformation.
  */

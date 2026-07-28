@@ -1,7 +1,7 @@
 package org.simulation.AsynchSim;
 
-import org.communicationModels.CycleRole;
-import org.graphs.OrientedPoint;
+import org.communicationModels.cycleBuildingComms.CycleRole;
+import org.graphs.util.OrientedPoint;
 import org.utils.logging.SimulationLogger;
 import org.utils.logging.TickRecord;
 import org.robots.GeometricCycleLatticeRobot;

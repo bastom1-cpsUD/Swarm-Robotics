@@ -1,7 +1,6 @@
 package org.graphs.voltage;
 
-import org.graphs.voltage.Role;
-import org.graphs.RigidBodyTransformation;
+import org.graphs.util.RigidBodyTransformation;
 
 /**
  * One directed half of a connection between two Role copies, labeled with the
@@ -75,6 +74,6 @@ public final class HalfEdge {
 
     @Override
     public String toString() {
-        return "HalfEdge[id: " + id + " origin: " + origin + " target: " + getTarget() + "]";
+        return "HalfEdge[id: " + id + " origin: " + origin.getId() + "]";
     }
 }

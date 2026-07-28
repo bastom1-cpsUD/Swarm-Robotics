@@ -1,4 +1,4 @@
-package org.graphs;
+package org.graphs.util;
 
 import Jama.Matrix;
 
@@ -48,12 +48,29 @@ public class RigidBodyTransformation {
     }
 
     /**
+     * Returns the identity transformation (no rotation, no translation).
+     * @return The identity transformation.
+     */
+    public static RigidBodyTransformation identity() {
+        return new RigidBodyTransformation(new OrientedPoint(0, 0, 0));
+    }
+
+    /**
      * Returns the inverse of this transformation.
      * @return The inverse transformation.
      */
     public RigidBodyTransformation inverse() {
         Matrix inverseMatrix = this.matrix.inverse();
         return new RigidBodyTransformation(inverseMatrix);
+    }
+
+    /**
+     * Composes this transformation with another, applied after this one.
+     * @param other the transformation expressed relative to this one's target frame
+     * @return the combined transformation from this one's source frame to other's target frame
+     */
+    public RigidBodyTransformation compose(RigidBodyTransformation other) {
+        return new RigidBodyTransformation(this.matrix.times(other.matrix));
     }
 
     /**
@@ -68,11 +85,6 @@ public class RigidBodyTransformation {
         double y = result.get(1, 0);
         double orientation = Math.atan2(this.matrix.get(1, 0), this.matrix.get(0, 0));
         return new OrientedPoint(x, y, orientation);
-    }
-
-    public RigidBodyTransformation compose(RigidBodyTransformation other) {
-        Matrix resultMatrix = this.matrix.times(other.matrix);
-        return new RigidBodyTransformation(resultMatrix);
     }
 
     /**

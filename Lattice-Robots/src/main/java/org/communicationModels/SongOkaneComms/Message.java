@@ -2,7 +2,7 @@ package org.communicationModels.SongOkaneComms;
 
 import java.util.PriorityQueue;
 
-import org.graphs.LatticeEdge;
+import org.graphs.lattice.LatticeEdge;
 
 /**
  * A class representing a message that can be sent between robots in the communication system.

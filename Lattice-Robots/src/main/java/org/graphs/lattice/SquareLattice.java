@@ -1,6 +1,8 @@
-package org.graphs;
+package org.graphs.lattice;
 
 import java.util.ArrayList;
+
+import org.graphs.util.OrientedPoint;
 
 public class SquareLattice extends LatticeGraph {
     private final double EDGE_LENGTH = 70.0;

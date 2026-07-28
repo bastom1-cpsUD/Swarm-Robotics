@@ -1,4 +1,4 @@
-package org.graphs;
+package org.graphs.util;
 /**
  * An extension of Point2D.Double that includes an orientation (angle in radians).
  */

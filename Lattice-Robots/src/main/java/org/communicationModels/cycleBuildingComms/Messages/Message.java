@@ -1,4 +1,4 @@
-package org.communicationModels.Messages;
+package org.communicationModels.cycleBuildingComms.Messages;
 /**
  * An interface that defines the basic functionality of a message used within the lattice formation problem.
  */

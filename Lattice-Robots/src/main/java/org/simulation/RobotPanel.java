@@ -24,7 +24,7 @@ import java.time.LocalDateTime;
 
 import org.robots.GeometricCycleLatticeRobot;
 import org.communicationModels.TrustLevel;
-import org.graphs.OrientedPoint;
+import org.graphs.util.OrientedPoint;
 
 public class RobotPanel extends JPanel {
     private static Map<Integer, GeometricCycleLatticeRobot> robots;
