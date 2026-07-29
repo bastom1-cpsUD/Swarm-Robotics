@@ -197,21 +197,6 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     }
 
     // ------------------------------------------------------------
-    // Visualization edges (simplified: no old parent logic)
-    // ------------------------------------------------------------
-    private void updateEdges() {
-        clearEdges();
-
-        // Optional: keep only debug visualization if comms exposes role
-        // Example (if you add getRole()):
-        //
-        // if (commsSystem.getRole() == CycleRole.cycleBuilder) { ... }
-
-        // Left intentionally minimal because new comms system
-        // handles structure internally via messages
-    }
-
-    // ------------------------------------------------------------
     // Accessors
     // ------------------------------------------------------------
     public LatticeMotionModel getLatticeMotionModel() {
@@ -228,10 +213,6 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
 
     public void setTrustLevel(TrustLevel trust) {
         commsSystem.setTrustLevel(trust);
-    }
-
-    public void promoteToRoot() {
-        commsSystem.promoteToPrimaryRoot();
     }
 
     public void promoteToPrimaryRoot() {
