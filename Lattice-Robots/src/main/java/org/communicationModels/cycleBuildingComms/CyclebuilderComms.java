@@ -39,12 +39,6 @@ public class CyclebuilderComms extends CommunicationSystem {
     // State-Data
     private int stableID;
     private int pendingChildID;
-    // The exact Edge instance added when the pending offer was sent (see
-    // broadcastMessage's root/cycleBuilder cases). Removed by reference, not
-    // by toId, on rejection -- self.getEdges() can hold another, unrelated
-    // Edge to the same robot ID from an earlier, still-valid assignment, and
-    // a toId-based removeIf would wipe that one out too.
-    private Edge pendingChildEdge;
     private boolean hasBeenAssigned;
     private ChainMemberList chainMemberList;
     private GeometricCycleLatticeRobot self;
@@ -57,11 +51,14 @@ public class CyclebuilderComms extends CommunicationSystem {
     private int originOutgoingEdgeID;
 
     // Time-Step Data
-    private HashMap<Integer, Observation> observations;
+    private HashMap<Integer, Observation> phaseOneObservations;
+    private HashMap<Integer, Observation> phaseTwoObservations;
     private boolean waitThisTimeStep;
 
     // Logging / instrumentation support (see CommsSnapshot, org.logging package)
     private ArrayList<OutgoingMessageRecord> sentThisTick;
+    // Visualization Support
+    private Edge pendingChildEdge;
 
     //MAIN ALGORITHM STEPS
 
@@ -76,7 +73,8 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.role = CycleRole.unassigned;
         this.completedCycles = new HashMap<>();
         this.self = self;
-        this.observations = new HashMap<>();
+        this.phaseOneObservations = new HashMap<>();
+        this.phaseTwoObservations = new HashMap<>();
         this.incomingMessages = new ConcurrentLinkedQueue<>();
         this.unableToDoAssignmentIDs = new ArrayList<>();
         this.sentThisTick = new ArrayList<>();
@@ -88,11 +86,11 @@ public class CyclebuilderComms extends CommunicationSystem {
         originOutgoingEdgeID = -1;
     }
 
-    public void makeObservations() {
+    public void makeFirstPhaseObservations() {
         ArrayList<GeometricCycleLatticeRobot> neighbors = self.getNeighbors();
-        observations.clear();
+        phaseOneObservations.clear();
         if(neighbors == null || neighbors.isEmpty()) {
-            observations = new HashMap<>();
+            phaseOneObservations = new HashMap<>();
             return;
         }
 
@@ -114,7 +112,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                 }
             }
             Observation obs = new Observation(neighbor, globalToLocal);
-            observations.put(neighbor.getRobotId(), obs);
+            phaseOneObservations.put(neighbor.getRobotId(), obs);
         }
 
         if(childHasLeft && pendingChildID != -1) {
@@ -122,6 +120,21 @@ public class CyclebuilderComms extends CommunicationSystem {
             self.getEdges().remove(pendingChildEdge);
             pendingChildEdge = null;
             pendingChildID = -1; // HAS MUTATED STATE
+        }
+    }
+
+    public void makeSecondPhaseObservations() {
+         ArrayList<GeometricCycleLatticeRobot> neighbors = self.getNeighbors();
+        phaseTwoObservations.clear();
+        if(neighbors == null || neighbors.isEmpty()) {
+            phaseTwoObservations = new HashMap<>();
+            return;
+        }
+
+        RigidBodyTransformation globalToLocal = globalTransformOf(getAssignedGlobalPosition(), null).inverse();
+        for(GeometricCycleLatticeRobot neighbor : neighbors) {
+            Observation obs = new Observation(neighbor, globalToLocal);
+            phaseTwoObservations.put(neighbor.getRobotId(), obs);
         }
     }
 
@@ -471,6 +484,12 @@ public class CyclebuilderComms extends CommunicationSystem {
         }
     }
 
+    public String detectCollisionPossibility() {
+
+        //TODO: Return String stating action
+        return null;
+    }
+
     //MESSAGE-PROCESSING UTIL
     private void forwardSuccessUpstream() {
         forwardSuccessUpstream(chainMemberList.getSenderID(), originVertexID, assignedOutgoingEdgeID);
@@ -575,7 +594,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         int rootID = chainMemberList.isEmpty() ? -1 : chainMemberList.getRootID();
 
         // Root is only a candidate if it's not banned/parent, and check it separately from the rest
-        Observation rootObs = observations.get(rootID);
+        Observation rootObs = phaseOneObservations.get(rootID);
         if (rootObs != null && !unableToDoAssignmentIDs.contains(rootID)) {
             double rootDistance = targetLocal.distance(rootObs.getLocalPosition());
             if (MathUtils.isZero(rootDistance, MathUtils.EPSILON)) {
@@ -588,7 +607,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         ArrayList<Observation> validObservations = new ArrayList<>();
         ArrayList<Observation> priorityObservations = new ArrayList<>();
 
-        for (Observation obs : observations.values()) {
+        for (Observation obs : phaseOneObservations.values()) {
             int robotID = obs.getId();
             if (robotID != rootID && !chainMemberList.isInList(robotID) && !unableToDoAssignmentIDs.contains(robotID)) {
                 // A neighbor already sitting exactly at the target position must win outright,
@@ -866,7 +885,6 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.pendingChildEdge = null;
         this.chainMemberList = new ChainMemberList();
         this.role = CycleRole.unassigned;
-        this.observations = new HashMap<>();
         unableToDoAssignmentIDs.clear();
 
         this.assignedVertexID = -1;
@@ -874,16 +892,14 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         this.originVertexID = -1;
         this.originOutgoingEdgeID = -1;
+
+        resetObservations();
     }
 
-    // --- Role-scoped resets (draft) -----------------------------------------
-    //
-    // Not called anywhere yet. Each one answers "what does a clean slate for
-    // role X look like" -- as opposed to reset() above, which is really
-    // "clean slate for unassigned" under a role-agnostic name. Every existing
-    // site in this file that partially mutates the same fields is marked
-    // "HAS MUTATED STATE" so it's easy to compare against what these would do
-    // and decide whether it should be swapped in.
+    public void resetObservations() {
+        this.phaseOneObservations.clear();
+        this.phaseTwoObservations.clear();
+    }
 
     /**
      * Clean slate for "unassigned": stableID, pendingChildID, chainMemberList,
@@ -988,14 +1004,12 @@ public class CyclebuilderComms extends CommunicationSystem {
                 getOriginEdge(),
                 Map.copyOf(completedCycles),
                 snapshotQueueInOrder(),
-                Map.copyOf(observations),
+                Map.copyOf(phaseOneObservations),
                 List.copyOf(unableToDoAssignmentIDs)
         );
     }
 
     private List<AbstractMessage> snapshotQueueInOrder() {
-        // PriorityBlockingQueue's own iterator makes no ordering guarantee,
-        // so copy out and sort a snapshot instead of trusting iteration order.
         List<AbstractMessage> copy = new ArrayList<>(incomingMessages);
         return copy;
     }

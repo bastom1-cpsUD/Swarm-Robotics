@@ -138,12 +138,12 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
 
         switch(getRole()) {
             case CycleRole.root -> {
-                commsSystem.makeObservations();
+                commsSystem.makeFirstPhaseObservations();
                 processed = commsSystem.processMessages(tick);
                 action = commsSystem.broadcastMessage(true, tick);
             }
             case CycleRole.stable -> {
-                commsSystem.makeObservations();
+                commsSystem.makeFirstPhaseObservations();
                 processed = commsSystem.processMessages(tick);
                 action = commsSystem.broadcastMessage(true, tick);
             }
@@ -151,7 +151,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
                 // 1. Process incoming messages
                 processed = commsSystem.processMessages(tick);
 
-                commsSystem.makeObservations();
+                commsSystem.makeFirstPhaseObservations();
 
                 // 2. Ask comms system for current target
                 OrientedPoint target = commsSystem.getAssignedGlobalPosition();
