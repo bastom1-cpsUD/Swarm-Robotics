@@ -16,8 +16,9 @@ repositories {
 }
 
 dependencies {
-    // Use JUnit Jupiter for testing.
-    implementation(libs.junit.jupiter)
+    // Use JUnit Jupiter for testing. Tests live in src/test/java, so this is a test-only
+    // dependency and does not leak into the application jar.
+    testImplementation(libs.junit.jupiter)
 
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 

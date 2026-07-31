@@ -26,10 +26,12 @@ import java.util.Map;
  * world coordinates:</p>
  * <ul>
  *   <li>The robot itself sits at the origin, facing +y — no transform needed,
- *       since that's already the frame {@code makeObservations()} computes.</li>
+ *       since that's already the frame {@code makeFirstPhaseObservations()} computes.</li>
  *   <li>Neighbor dots are plotted directly from {@code Observation.getLocalPosition()}
  *       captured in the pre-tick snapshot — exactly the data the algorithm
- *       itself used to make its decision this tick.</li>
+ *       itself used to make its decision this tick. Only the position is drawn;
+ *       {@code Observation.getLocalOrientation()} now also carries the neighbor's
+ *       heading relative to this robot, which could be rendered as a facing arrow.</li>
  *   <li>The trajectory (a list of world-frame poses accumulated by
  *       {@link SimulationLogger}) is re-projected into <em>this tick's</em>
  *       local frame at render time, via {@code RigidBodyTransformation}'s

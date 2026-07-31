@@ -2,6 +2,8 @@ package org.graphs.util;
 
 import Jama.Matrix;
 
+import org.utils.MathUtils;
+
 /**
  * A class representing a rigid body transformation in 2D space, consisting of a rotation and a translation.
  */
@@ -10,17 +12,37 @@ public class RigidBodyTransformation {
     Matrix matrix;
 
     /**
-     * Constructs a transformation that maps the 'from' oriented point to the 'to' oriented point.
+     * Constructs the transformation expressing {@code to} in {@code from}'s frame, i.e.
+     * {@code T_from^-1 * T_to}, where both are poses in a common parent frame.
+     * Equivalently: the unique T for which
+     * {@code new RigidBodyTransformation(from).compose(T)} equals
+     * {@code new RigidBodyTransformation(to)}.
+     *
+     * <p>Do NOT call this with a {@code to} that is already expressed relative to
+     * {@code from} -- that subtracts {@code from} a second time. For an
+     * already-relative pose use the single-argument constructor instead.
+     *
      * @param from The starting oriented point.
      * @param to The target oriented point.
      */
     public RigidBodyTransformation(OrientedPoint from, OrientedPoint to) {
-        OrientedPoint delta = new OrientedPoint(to.x - from.x, to.y - from.y, to.getOrientation() - from.getOrientation());
-        double cosTheta = Math.cos(delta.getOrientation());
-        double sinTheta = Math.sin(delta.getOrientation());
+        double deltaTheta = to.getOrientation() - from.getOrientation();
+        double cosTheta = Math.cos(deltaTheta);
+        double sinTheta = Math.sin(deltaTheta);
+
+        // The translation is (to - from) expressed in `from`'s frame: R(-theta_from) * d.
+        // Leaving it unrotated, as this used to, is only correct when from's own
+        // orientation is zero.
+        double dx = to.x - from.x;
+        double dy = to.y - from.y;
+        double cosFrom = Math.cos(from.getOrientation());
+        double sinFrom = Math.sin(from.getOrientation());
+        double tx =  cosFrom * dx + sinFrom * dy;
+        double ty = -sinFrom * dx + cosFrom * dy;
+
         this.matrix = new Matrix(new double[][] {
-            {cosTheta, -sinTheta, delta.x},
-            {sinTheta, cosTheta, delta.y},
+            {cosTheta, -sinTheta, tx},
+            {sinTheta, cosTheta, ty},
             {0, 0, 1}
         });
     }
@@ -74,16 +96,46 @@ public class RigidBodyTransformation {
     }
 
     /**
-     * Applies a transformation via matrix multiplication
-     * @param point the point that undergoes matrix multiplication
-     * @return the transformed point
+     * The rotation this transformation induces, in radians: the angle of the source
+     * frame's x-axis expressed in the target frame. Exact, since the upper-left block
+     * is a proper rotation. The result lies in [-pi, pi] (atan2's codomain).
+     * @return this transformation's own rotation angle
+     */
+    public double getRotation() {
+        return Math.atan2(this.matrix.get(1, 0), this.matrix.get(0, 0));
+    }
+
+    /**
+     * This transformation viewed as a pose: the image of the origin, carrying this
+     * transformation's own rotation. Exactly equivalent to, and the intended
+     * replacement for, {@code apply(new OrientedPoint(0, 0, 0))}.
+     * @return the pose this transformation maps the identity pose to
+     */
+    public OrientedPoint asPose() {
+        return new OrientedPoint(matrix.get(0, 2), matrix.get(1, 2), getRotation());
+    }
+
+    /**
+     * Applies this transformation to a pose. The position is transformed by matrix
+     * multiplication; the orientation is composed additively, because a homogeneous
+     * multiply cannot carry the point's own theta through -- the third slot of the
+     * column vector holds the homogeneous 1, not an angle. The rotation between the
+     * two frames is still stored in the matrix (see {@link #getRotation()}); it just
+     * has to be applied separately.
+     *
+     * @param point the pose to transform
+     * @return the pose expressed in this transformation's target frame, with its
+     *         orientation normalized to (-pi, pi]
      */
     public OrientedPoint apply(OrientedPoint point) {
         Matrix pointMatrix = new Matrix(new double[][] {{point.x}, {point.y}, {1}});
         Matrix result = this.matrix.times(pointMatrix);
         double x = result.get(0, 0);
         double y = result.get(1, 0);
-        double orientation = Math.atan2(this.matrix.get(1, 0), this.matrix.get(0, 0));
+        // Normalizing is canonical-form hygiene, not a wrap fix: the sum of two
+        // (-pi, pi] values lands in (-2pi, 2pi], and OrientedPoint.equals compares
+        // orientation with an exact Double.compare.
+        double orientation = MathUtils.normalizeAngle(point.getOrientation() + getRotation());
         return new OrientedPoint(x, y, orientation);
     }
 

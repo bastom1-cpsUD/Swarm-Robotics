@@ -1,13 +1,11 @@
 package org.communicationModels.cycleBuildingComms;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.PriorityBlockingQueue;
 
 import org.communicationModels.Observation;
 import org.communicationModels.TrustLevel;
@@ -26,6 +24,7 @@ import org.graphs.voltage.VoltageGraph;
 import org.robots.GeometricCycleLatticeRobot;
 import org.simulation.Edge;
 import org.utils.MathUtils;
+import org.utils.Vec2;
 import org.utils.logging.CommsSnapshot;
 import org.utils.logging.OutgoingMessageRecord;
 
@@ -50,17 +49,18 @@ public class CyclebuilderComms extends CommunicationSystem {
     private int originVertexID;
     private int originOutgoingEdgeID;
 
+
     // Time-Step Data
     private HashMap<Integer, Observation> phaseOneObservations;
     private HashMap<Integer, Observation> phaseTwoObservations;
+    private OrientedPoint positionPriorToPhaseOne;
+    private OrientedPoint positionPriorToPhaseTwo;
     private boolean waitThisTimeStep;
 
     // Logging / instrumentation support (see CommsSnapshot, org.logging package)
     private ArrayList<OutgoingMessageRecord> sentThisTick;
     // Visualization Support
     private Edge pendingChildEdge;
-
-    //MAIN ALGORITHM STEPS
 
     public CyclebuilderComms(GeometricCycleLatticeRobot self, VoltageGraph graph) {
         this.graph = graph;
@@ -79,14 +79,25 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.unableToDoAssignmentIDs = new ArrayList<>();
         this.sentThisTick = new ArrayList<>();
         this.waitThisTimeStep = false;
-
+        this.positionPriorToPhaseOne = null;
+        this.positionPriorToPhaseTwo = null;
         assignedVertexID = -1;
         assignedOutgoingEdgeID = -1;
         originVertexID = -1;
         originOutgoingEdgeID = -1;
     }
 
+    /*
+        ////////////////
+        PHASE ONE LOGIC
+        ////////////////
+     */
+
     public void makeFirstPhaseObservations() {
+        //Store position of self prior to movement after phase one
+        this.positionPriorToPhaseOne = self.getPosition();
+
+        //Observe neighbors and their positions
         ArrayList<GeometricCycleLatticeRobot> neighbors = self.getNeighbors();
         phaseOneObservations.clear();
         if(neighbors == null || neighbors.isEmpty()) {
@@ -95,14 +106,21 @@ public class CyclebuilderComms extends CommunicationSystem {
         }
 
         RigidBodyTransformation globalToLocal = new RigidBodyTransformation(self.getPosition()).inverse();
+
+        //Check if pendingChild has left communication range; if cyclebuilder, check if someone occupies my spot
         boolean childHasLeft = true;
         OrientedPoint myAssignment = getAssignedLocalPosition();
+
         for(GeometricCycleLatticeRobot neighbor : neighbors) {
             if(neighbor.getRobotId() == pendingChildID) {
                 childHasLeft = false;
             }
             if(role == CycleRole.cycleBuilder) {
                 OrientedPoint neighborPosition = globalToLocal.apply(neighbor.getPosition());
+                //EDIT FOR PROPER ANGLE PRESERVATION (NEW ANGLE PRESERVATION EXISTS)
+                // "My assignment is already occupied" fires on position coincidence
+                // alone. neighborPosition now carries the neighbor's heading in this
+                // robot's frame, so occupancy can require a pose match.
                 if(MathUtils.isZero(myAssignment.distance(neighborPosition), MathUtils.EPSILON)) {
                     forwardRejectionToParent(false);
                     resetToUnassigned();
@@ -121,21 +139,8 @@ public class CyclebuilderComms extends CommunicationSystem {
             pendingChildEdge = null;
             pendingChildID = -1; // HAS MUTATED STATE
         }
-    }
 
-    public void makeSecondPhaseObservations() {
-         ArrayList<GeometricCycleLatticeRobot> neighbors = self.getNeighbors();
-        phaseTwoObservations.clear();
-        if(neighbors == null || neighbors.isEmpty()) {
-            phaseTwoObservations = new HashMap<>();
-            return;
-        }
 
-        RigidBodyTransformation globalToLocal = globalTransformOf(getAssignedGlobalPosition(), null).inverse();
-        for(GeometricCycleLatticeRobot neighbor : neighbors) {
-            Observation obs = new Observation(neighbor, globalToLocal);
-            phaseTwoObservations.put(neighbor.getRobotId(), obs);
-        }
     }
 
     @Override
@@ -484,10 +489,83 @@ public class CyclebuilderComms extends CommunicationSystem {
         }
     }
 
-    public String detectCollisionPossibility() {
+    /*
+        ////////////////
+        PHASE TWO LOGIC
+        ////////////////
+     */
 
-        //TODO: Return String stating action
-        return null;
+    public void makeSecondPhaseObservations() {
+        //Store position of self prior to phase two movement
+        this.positionPriorToPhaseTwo = self.getPosition();
+
+        ArrayList<GeometricCycleLatticeRobot> neighbors = self.getNeighbors();
+        phaseTwoObservations.clear();
+        if(neighbors == null || neighbors.isEmpty()) {
+            phaseTwoObservations = new HashMap<>();
+            return;
+        }
+
+        RigidBodyTransformation globalToLocal = globalTransformOf(getAssignedGlobalPosition(), null).inverse();
+        for(GeometricCycleLatticeRobot neighbor : neighbors) {
+            Observation obs = new Observation(neighbor, globalToLocal);
+            phaseTwoObservations.put(neighbor.getRobotId(), obs);
+        }
+    }
+
+    public String detectCollisionPossibility() {
+        ArrayList<Integer> movingRobots = new ArrayList<>();
+        for(Observation obs1 : phaseOneObservations.values()) {
+            int id = obs1.getId();
+            Observation obs2 = phaseTwoObservations.get(id);
+
+            if(obs2 == null || observationsAreEqual(obs1, obs2)) {
+                continue;
+            } else {
+                movingRobots.add(id);
+            }
+        }
+
+        for(Observation obs2 : phaseTwoObservations.values()) {
+            int id = obs2.getId();
+            Observation obs1 = phaseOneObservations.get(id);
+            if(obs1 == null) {
+                movingRobots.add(id);
+            }
+        }
+
+        for(int id : movingRobots) {
+            Observation obs1 = phaseOneObservations.get(id);
+            Observation obs2 = phaseTwoObservations.get(id);
+
+            Vec2 movementVector;
+            if(obs1 == null) movementVector = new Vec2(Math.cos(obs2.getLocalOrientation()), Math.sin(obs2.getLocalOrientation()));
+            movementVector = Vec2.between(obs1.getLocalPosition(), obs2.getLocalPosition());
+
+            boolean targetOnOtherTrajectory = MathUtils.pointOnLineTest(obs2.getLocalPosition(), movementVector, getAssignedLocalPosition());
+            if(targetOnOtherTrajectory) {
+                if(self.getRobotId() < id) {
+                    continue;
+                } else {
+                    forwardRejectionToParent(false);
+                    resetToUnassigned();
+                    hasBeenAssigned = false;
+                    self.clearEdges();
+                    log("-> Assignment taken by someone with higher id. Forwarding rejection to parent.");
+                    return "Assignment taken by someone with higher id. Forwarding rejection to parent.";
+                }
+            }
+        }
+        return "No collision detected.";
+    }
+
+    public boolean observationsAreEqual(Observation obs1, Observation obs2) {
+            Vec2 movementVector = Vec2.between(positionPriorToPhaseOne, positionPriorToPhaseTwo);
+            Vec2 obs1Vector = Vec2.of(obs1.getLocalPosition());
+            Vec2 obs2Vector = Vec2.of(obs2.getLocalPosition());
+
+            Vec2 lhs = obs1Vector.minus(movementVector);
+        return Double.compare(lhs.x, obs2Vector.x) == 0 && Double.compare(lhs.y, obs2Vector.y) == 0;
     }
 
     //MESSAGE-PROCESSING UTIL
@@ -596,6 +674,10 @@ public class CyclebuilderComms extends CommunicationSystem {
         // Root is only a candidate if it's not banned/parent, and check it separately from the rest
         Observation rootObs = phaseOneObservations.get(rootID);
         if (rootObs != null && !unableToDoAssignmentIDs.contains(rootID)) {
+            //EDIT FOR PROPER ANGLE PRESERVATION (NEW ANGLE PRESERVATION EXISTS)
+            // Cycle closure on position alone. Both operands now carry meaningful
+            // headings -- targetLocal from the edge's voltage, rootObs from the
+            // observation -- so this can become a pose match rather than a point match.
             double rootDistance = targetLocal.distance(rootObs.getLocalPosition());
             if (MathUtils.isZero(rootDistance, MathUtils.EPSILON)) {
                 log("-> root is exactly at target position, closing cycle");
@@ -617,6 +699,9 @@ public class CyclebuilderComms extends CommunicationSystem {
                 // and this is exactly the case -- an already-placed neighbor from an adjoining
                 // face/edge -- that must be picked to avoid placing a duplicate robot on top
                 // of it.
+                //EDIT FOR PROPER ANGLE PRESERVATION (NEW ANGLE PRESERVATION EXISTS)
+                // Position-only match, as above: a neighbor sitting on the right spot
+                // with the wrong heading is currently reused as though it fit.
                 if (MathUtils.isZero(targetLocal.distance(obs.getLocalPosition()), MathUtils.EPSILON)) {
                     log("-> " + robotID + " is exactly at target position, closing onto existing neighbor");
                     return getNeighborByID(robotID);
@@ -632,7 +717,7 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         int bestNeighborID = -1;
         double smallestDistance = Double.MAX_VALUE;
-        
+
         if(!priorityObservations.isEmpty()) {
             validObservations = priorityObservations;
         }
@@ -661,7 +746,8 @@ public class CyclebuilderComms extends CommunicationSystem {
         //Point of candidate
         OrientedPoint p3 = new OrientedPoint(obs.getLocalPosition());
         //Point of future target
-        OrientedPoint p4 = MathUtils.vectorSum(p2, getTargetInLocalCoordinates(inferNextEdge(targetEdge)));
+        //EDIT FOR PROPER ANGLE PRESERVATION (NEW ANGLE PRESERVATION EXISTS)
+        OrientedPoint p4 = Vec2.of(p2).plus(Vec2.of(getTargetInLocalCoordinates(inferNextEdge(targetEdge)))).asOrientedPoint();
         //Point of parent
         OrientedPoint p5 = getTargetInLocalCoordinates(getAssignedEdge().getTwin());
 
@@ -676,7 +762,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     private OrientedPoint getTargetInLocalCoordinates(HalfEdge edge) {
-        return edge.getVoltage().apply(new OrientedPoint(0, 0, 0));
+        return edge.getVoltage().asPose();
     }
 
     private boolean checkAssignmentForCurrentPosition(PositioningMessage pm) {
@@ -686,14 +772,17 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         log("Assigned local position is: " + localAssignment);
 
-        // Self, expressed in self's own frame, is always exactly the origin --
-        // not just approximately so for zero-rotation edges, as computing it
-        // via RigidBodyTransformation(self).inverse().apply(self) would give
-        // (RigidBodyTransformation.apply() discards the input point's own
-        // orientation, so that formula silently returned (0, 0, -selfOrientation)
-        // instead of (0, 0, 0) whenever self's orientation was nonzero).
+        // Self, expressed in self's own frame, is exactly the origin. Stated directly
+        // rather than computed via RigidBodyTransformation(self).inverse().apply(self):
+        // that formula now returns (0, 0, 0) correctly, but spelling out the identity
+        // is clearer than deriving it.
         OrientedPoint positionInLocal = new OrientedPoint(0, 0, 0);
 
+        //EDIT FOR PROPER ANGLE PRESERVATION (NEW ANGLE PRESERVATION EXISTS)
+        // The angle test below uses the default EPSILON (1e-3), not the
+        // REASSIGNMENT_ANGLE_EPSILON (1e-1) written for exactly this check -- that
+        // constant currently has no call sites, while the x/y tests above correctly
+        // use the loose position epsilon.
         return MathUtils.approxEquals(localAssignment.x, positionInLocal.getX(), MathUtils.REASSIGNMENT_POSITION_EPSILON)
                 && MathUtils.approxEquals(localAssignment.y, positionInLocal.getY(), MathUtils.REASSIGNMENT_POSITION_EPSILON)
                 && MathUtils.isZero(MathUtils.angleDifference(localAssignment.getOrientation(), positionInLocal.getOrientation()));
@@ -837,7 +926,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         if (parent == null) return null;
 
         return globalTransformOf(parent.getPosition(), assignedEdge.getVoltage())
-                .apply(new OrientedPoint(0, 0, 0));
+                .asPose();
     }
 
     private OrientedPoint getAssignedLocalPosition() {
@@ -863,18 +952,19 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         return new RigidBodyTransformation(self.getPosition()).inverse()
                 .compose(assignedGlobalTransform)
-                .apply(new OrientedPoint(0, 0, 0));
+                .asPose();
     }
 
     /**
-     * Composes a base pose with a transform relative to it (e.g. an edge's
-     * voltage) into the resulting global transform, correctly accumulating
-     * rotation. RigidBodyTransformation.apply() discards the orientation of
-     * whatever point it's given, so chaining via
-     * {@code new RigidBodyTransformation(basePose).apply(relative.apply(origin))}
-     * silently drops any rotation `relative` carries -- invisible for
-     * square/hex, where every edge's rotation is zero, but wrong for
-     * octagon-square, where it usually isn't.
+     * Composes a base pose with a transform relative to it (e.g. an edge's voltage)
+     * into the resulting global transform, accumulating rotation along the way.
+     *
+     * <p>This originally existed to route around
+     * {@code RigidBodyTransformation.apply()} discarding the orientation of whatever
+     * point it was given. That is fixed -- {@code apply()} now composes the pose's own
+     * heading -- so the workaround is no longer load-bearing. Composing transforms and
+     * reading the result once with {@code asPose()} is still the clearer spelling than
+     * chaining point-applications, so the method stays.
      */
     private static RigidBodyTransformation globalTransformOf(OrientedPoint basePose, RigidBodyTransformation relative) {
         return new RigidBodyTransformation(basePose).compose(relative);

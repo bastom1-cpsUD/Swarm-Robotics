@@ -186,10 +186,29 @@ public class DecentralizedComms extends CommunicationSystem {
             OrientedPoint assignedLocationGlobal = parentLocalToGlobal.apply(assignedEdge.getToPos());
 
             RigidBodyTransformation edgeTransform = assignedEdge.getEdgeTransformation();
+            //EDIT FOR PROPER ANGLE PRESERVATION (NEW ANGLE PRESERVATION EXISTS)
+            // This whole block reconstructs the edge's rotation by hand, by transforming
+            // a unit x-axis probe and taking atan2 of the positional difference, purely
+            // because apply() would not hand back the angle. It collapses to
+            // `double localTheta = edgeTransform.getRotation();`.
+            //
+            // Deliberately NOT changed here, because it is not a no-op: the probe
+            // computes fl(m00 + m02) - m02 where m00 is order 1 and m02 is EDGE_LENGTH.
+            // Doubles near 71 are spaced ~1.4e-14 apart versus ~2.2e-16 near 1.0, so the
+            // addition rounds away roughly 6 low bits of cos(theta) (the later
+            // subtraction is exact -- the loss already happened). getRotation() reads
+            // m00/m10 straight out of the matrix and is strictly more accurate, hence a
+            // *different* number by ~1e-14, feeding a target heading in a
+            // threshold-driven multi-robot system. Needs its own commit and its own
+            // convergence check.
+            //
+            // (The normalizeAngle calls below look like a units bug -- wrapping lengths
+            // as though they were angles -- but are harmless: the translation cancels in
+            // the probe difference, so both values are components of a unit vector in
+            // [-1, 1], where normalizeAngle is the identity.)
             OrientedPoint xAxisInParent = edgeTransform.apply(new OrientedPoint(1, 0 ,0));
             OrientedPoint destinationInParent = edgeTransform.apply(new OrientedPoint(0,0,0));
-        
-            //POSSIBLY NORMALIZE THESE ANGLES THEN PASS TO ATAN2
+
             double dxOrientation = MathUtils.normalizeAngle(xAxisInParent.x - destinationInParent.x);
             double dyOrientation = MathUtils.normalizeAngle(xAxisInParent.y - destinationInParent.y);
 
