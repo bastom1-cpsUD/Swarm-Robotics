@@ -214,6 +214,12 @@ public class ContinuousDiffDrive extends MotionModel {
         return 0.0;
     }
     
+    //EDIT FOR PROPER ANGLE PRESERVATION (NEW ANGLE PRESERVATION EXISTS)
+    // Duplicate of MathUtils.normalizeAngle, which is the canonical one. Not deleted
+    // here because the two are not identical: this loop uses `angle < -Math.PI` where
+    // MathUtils uses `<=`, so this one leaves exactly -pi alone while MathUtils maps it
+    // to +pi. Swapping them is a real, if measure-zero, motion-model behaviour change
+    // and deserves its own commit.
     private double normalizeAngle(double angle) {
         while(angle > Math.PI) {
             angle -= 2 * Math.PI;

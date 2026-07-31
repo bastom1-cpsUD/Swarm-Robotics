@@ -39,7 +39,11 @@ public class LatticeEdge {
         this.from = from;
         this.to = to;
         this.toPos = pose;
-        this.transformation = new RigidBodyTransformation(from.getPose(), toPos);
+        // Single-arg, not (from.getPose(), toPos): `pose` is already the target's pose
+        // relative to `from`, so the two-arg constructor would subtract `from`'s pose a
+        // second time. That was visibly wrong for HexagonLattice, whose v1 sits at
+        // (25, 43.3) -- e5 ("Right", offset (50, 0)) was becoming (25, -43.3).
+        this.transformation = new RigidBodyTransformation(toPos);
         this.isNull = false;
     }
 

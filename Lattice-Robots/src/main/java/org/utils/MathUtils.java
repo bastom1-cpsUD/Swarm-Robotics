@@ -52,6 +52,20 @@ public final class MathUtils {
      */
     public static final double REASSIGNMENT_ANGLE_EPSILON = 1e-1;
 
+    /**
+     * Tolerance for treating three points as collinear in
+     * {@link #threePointClockwiseCounterClockwiseTest}.
+     *
+     * <p>Unlike {@link #EPSILON} this is an AREA, not a length: the quantity compared
+     * against it is a cross product, so it scales as the square of the edge length
+     * (~4900 for the current lattices at EDGE_LENGTH 70). {@code 1e-6} sits about six
+     * orders of magnitude above the floating-point noise floor for products of that
+     * size (~1e-12) and about nine below a genuine turn (~3.5e3), so the margin is wide
+     * on both sides — but it is tied to lattice scale and must be revisited if edge
+     * lengths change by orders of magnitude.
+     */
+    public static final double COLLINEARITY_EPSILON = 1e-6;
+
     private MathUtils() {
         // Utility class
     }
@@ -137,41 +151,33 @@ public final class MathUtils {
      * @return negative if counterclockwise, 0 if co-linear, positive if clockwise
      */
     public static int threePointClockwiseCounterClockwiseTest(OrientedPoint p1, OrientedPoint p2, OrientedPoint p3) {
-        OrientedPoint v1 = new OrientedPoint(p2.getX() - p1.getX(), p2.getY() - p1.getY(), 0);
-        OrientedPoint v2 = new OrientedPoint(p3.getX() - p2.getX(), p3.getY() - p2.getY(), 0);
+        double sigma = -1 * Vec2.between(p1, p2).cross(Vec2.between(p2, p3));
 
-        double sigma = -1 * crossProduct(v1, v2);
-
-        if(sigma == 0.0) {
+        // Tested against COLLINEARITY_EPSILON rather than exact zero. An exact-zero test
+        // on a cross product almost never fires -- near-collinear triples were returning
+        // +/-1 on the sign of the floating-point noise -- and collinearity is precisely
+        // what a lattice produces.
+        if(isZero(sigma, COLLINEARITY_EPSILON)) {
             return 0;
         }
 
         return sigma > 0.0 ? 1 : -1;
     }
 
-    public static double angleBetween(OrientedPoint v1, OrientedPoint v2) {
-        return normalizeAngle(Math.atan2(crossProduct(v1, v2), dotProduct(v1, v2)));
+    public static boolean pointOnLineTest(OrientedPoint p1, Vec2 v1, OrientedPoint target) {   
+        if (isZero(v1.x) && isZero(v1.y)) {
+            return false;
+        } 
+        // Vector from line start to target point
+        Vec2 v2 = Vec2.between(p1, target);
+        
+        // 2D Cross Product (determinant)
+        // Mathematically equivalent to: (dx / v1.x) == (dy / v1.y) cross-multiplied
+        double crossProduct = v1.cross(v2);
+        
+        return isZero(crossProduct);
     }
 
-    public static OrientedPoint vectorSum(OrientedPoint v1, OrientedPoint v2) {
-        return new OrientedPoint(v1.getX() + v2.getX(), v1.getY() + v2.getY(), 0);
-    }
-
-    public static OrientedPoint vectorBetween(OrientedPoint p1, OrientedPoint p2) {
-        return new OrientedPoint(p2.getX() - p1.getX(), p2.getY() - p1.getY(), 0);
-    }
-
-    public static double dotProduct(OrientedPoint v1, OrientedPoint v2) {
-        return v1.getX() * v2.getX() + v1.getY() * v2.getY();
-    }
-
-    public static double crossProduct(OrientedPoint v1, OrientedPoint v2) {
-        return v1.getX() * v2.getY() - v1.getY() * v2.getX();
-    }
-
-    public static double magnitude(OrientedPoint v1) {
-        return Math.sqrt(v1.getX() * v1.getX() + v1.getY() * v1.getY());
-    }
 
     public static void main(String[] args) {
         OrientedPoint p1 = new OrientedPoint(0,0,0);
