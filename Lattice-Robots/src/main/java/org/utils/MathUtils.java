@@ -164,21 +164,6 @@ public final class MathUtils {
         return sigma > 0.0 ? 1 : -1;
     }
 
-    public static boolean pointOnLineTest(OrientedPoint p1, Vec2 v1, OrientedPoint target) {   
-        if (isZero(v1.x) && isZero(v1.y)) {
-            return false;
-        } 
-        // Vector from line start to target point
-        Vec2 v2 = Vec2.between(p1, target);
-        
-        // 2D Cross Product (determinant)
-        // Mathematically equivalent to: (dx / v1.x) == (dy / v1.y) cross-multiplied
-        double crossProduct = v1.cross(v2);
-        
-        return isZero(crossProduct);
-    }
-
-
     public static void main(String[] args) {
         OrientedPoint p1 = new OrientedPoint(0,0,0);
         OrientedPoint p2 = new OrientedPoint(2, 5, 0);

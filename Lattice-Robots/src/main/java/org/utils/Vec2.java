@@ -84,6 +84,10 @@ public final class Vec2 {
         return Math.sqrt(x * x + y * y);
     }
 
+    public Vec2 scaled(double scale) {
+        return new Vec2(x * scale, y * scale);
+    }
+
     /**
      * The signed angle from this vector to {@code other}, wrapped into (-pi, pi].
      * @param other the vector to measure to

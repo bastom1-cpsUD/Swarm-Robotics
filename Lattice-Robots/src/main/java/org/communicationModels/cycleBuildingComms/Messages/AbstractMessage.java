@@ -5,6 +5,13 @@ package org.communicationModels.cycleBuildingComms.Messages;
  */
 public abstract class AbstractMessage implements Message, Comparable<AbstractMessage> {
     /**
+     * Recipient value marking a message as a broadcast: emitted once and heard by every
+     * robot in range, rather than addressed to a single robot. No robot ever carries this
+     * as an id, so it can never collide with a real recipient.
+     */
+    public static final int BROADCAST = -1;
+
+    /**
      * The sender ID of a message
      */
     protected int senderId;
