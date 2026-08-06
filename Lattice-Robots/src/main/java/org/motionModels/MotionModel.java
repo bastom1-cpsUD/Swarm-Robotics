@@ -26,5 +26,7 @@ public abstract class MotionModel {
 
     public double getDistanceTraveled() {
         return distTraveled;
-    } 
+    }
+    
+    public abstract double getMaxSpeed();
 }

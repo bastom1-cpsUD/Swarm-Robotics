@@ -34,20 +34,27 @@ Common commands (run from repo root):
 
 ### Tests — read this before assuming `gradle test` covers anything
 
-JUnit tests in `Lattice-Robots` (`VoltageGraphBuilderTest`, `VoltageGraphsTest`,
-`HungarianAlgoTest`) live under `src/main/java`, not `src/test/java`, and the module's
-`build.gradle.kts` declares `junit-jupiter` as `implementation`, not
-`testImplementation`. This is intentional-but-unusual: it makes the tests
-IDE-discoverable (VS Code's Java Test Runner scans the whole classpath) without setting
-up a `src/test` tree for this module. The practical consequence: `./gradlew.bat
-:Lattice-Robots:test` reports `NO-SOURCE` and runs nothing — it is not a signal that
-tests pass. To actually run these tests, use the IDE's test runner/explorer, or invoke
-the JUnit Console Launcher directly against the compiled `main` classes. The `Graphs`
-module has an (empty) `src/test` tree and also runs nothing via `gradle test`.
+`Lattice-Robots` tests live under `src/test/java` and run normally:
 
-`HungarianAlgo` additionally has a hand-rolled `HungarianAlgoTestRunner` with a
-`main()` that runs the same test methods manually via reflection, for use without any
-test framework wiring at all.
+```
+./gradlew.bat :Lattice-Robots:test
+```
+
+They previously lived under `src/main/java` with `junit-jupiter` declared as
+`implementation`, which made them IDE-discoverable but meant `gradle test` reported
+`NO-SOURCE` and silently ran nothing — a false green. They were moved to a real
+`src/test` tree and the dependency is now `testImplementation`, so the IDE runner and
+Gradle run the same suite.
+
+Current tests: `RigidBodyTransformationTest` and `Vec2Test` (the geometry primitives —
+pose/vector transformation, angle composition, and the tolerance behaviour they depend
+on), `VoltageGraphBuilderTest`, `VoltageGraphsTest`, and `HungarianAlgoTest`.
+
+`HungarianAlgo` additionally has a hand-rolled `HungarianAlgoTestRunner` with a `main()`
+that runs the same test methods manually via reflection. It predates `gradle test`
+working and is no longer the way to run anything.
+
+The `Graphs` module has an (empty) `src/test` tree and runs nothing via `gradle test`.
 
 ## Architecture (Lattice-Robots)
 

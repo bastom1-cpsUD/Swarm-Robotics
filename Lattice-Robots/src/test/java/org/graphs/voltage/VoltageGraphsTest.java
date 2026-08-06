@@ -1,6 +1,5 @@
 package org.graphs.voltage;
 
-import org.graphs.util.OrientedPoint;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -61,8 +60,7 @@ class VoltageGraphsTest {
 
         for (Role role : graph.getRoles()) {
             for (HalfEdge h : graph.getOutgoingHalfEdges(role)) {
-                OrientedPoint delta = h.getVoltage().apply(new OrientedPoint(0, 0, 0));
-                assertEquals(0.0, delta.getOrientation(), 1e-9);
+                assertEquals(0.0, h.getVoltage().getRotation(), 1e-9);
             }
         }
     }

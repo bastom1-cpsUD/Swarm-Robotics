@@ -16,6 +16,7 @@ import org.communicationModels.cycleBuildingComms.Messages.PositioningMessage;
 import org.communicationModels.cycleBuildingComms.Messages.PromotionMessage;
 import org.communicationModels.cycleBuildingComms.Messages.RejectAssignmentMessage;
 import org.communicationModels.cycleBuildingComms.Messages.StatusMessage;
+import org.communicationModels.cycleBuildingComms.Messages.TargetClaimMessage;
 import org.graphs.util.OrientedPoint;
 import org.graphs.util.RigidBodyTransformation;
 import org.graphs.voltage.HalfEdge;
@@ -24,6 +25,7 @@ import org.graphs.voltage.VoltageGraph;
 import org.robots.GeometricCycleLatticeRobot;
 import org.simulation.Edge;
 import org.utils.MathUtils;
+import org.utils.Vec2;
 import org.utils.logging.CommsSnapshot;
 import org.utils.logging.OutgoingMessageRecord;
 
@@ -31,18 +33,17 @@ public class CyclebuilderComms extends CommunicationSystem {
     private TrustLevel trust;
 
     private static final boolean VERBOSE = true;
+    // Two phases is one full time step: a claim survives the phase it arrived in and the
+    // next, then goes. Long enough to tolerate one dropped beacon and to stay immune to
+    // the order robots happen to activate in; short enough that a robot which went
+    // unassigned and stopped emitting cannot keep provoking a phantom conflict.
+    private static final int CLAIM_TTL_PHASES = 2;
     private HashMap<Integer, CycleStatus> completedCycles;
     private final VoltageGraph graph;
 
     // State-Data
     private int stableID;
     private int pendingChildID;
-    // The exact Edge instance added when the pending offer was sent (see
-    // broadcastMessage's root/cycleBuilder cases). Removed by reference, not
-    // by toId, on rejection -- self.getEdges() can hold another, unrelated
-    // Edge to the same robot ID from an earlier, still-valid assignment, and
-    // a toId-based removeIf would wipe that one out too.
-    private Edge pendingChildEdge;
     private boolean hasBeenAssigned;
     private ChainMemberList chainMemberList;
     private GeometricCycleLatticeRobot self;
@@ -54,14 +55,19 @@ public class CyclebuilderComms extends CommunicationSystem {
     private int originVertexID;
     private int originOutgoingEdgeID;
 
+
     // Time-Step Data
-    private HashMap<Integer, Observation> observations;
+    private HashMap<Integer, Observation> phaseOneObservations;
+    // Re-observed in phase two rather than reusing phase one's: a tick of motion happens
+    // between the two, so phase one's relative poses are stale by the time an incoming
+    // claim has to be converted into this robot's frame.
+    private HashMap<Integer, Observation> phaseTwoObservations;
     private boolean waitThisTimeStep;
 
     // Logging / instrumentation support (see CommsSnapshot, org.logging package)
     private ArrayList<OutgoingMessageRecord> sentThisTick;
-
-    //MAIN ALGORITHM STEPS
+    // Visualization Support
+    private Edge pendingChildEdge;
 
     public CyclebuilderComms(GeometricCycleLatticeRobot self, VoltageGraph graph) {
         this.graph = graph;
@@ -74,45 +80,62 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.role = CycleRole.unassigned;
         this.completedCycles = new HashMap<>();
         this.self = self;
-        this.observations = new HashMap<>();
+        this.phaseOneObservations = new HashMap<>();
+        this.phaseTwoObservations = new HashMap<>();
         this.incomingMessages = new ConcurrentLinkedQueue<>();
         this.unableToDoAssignmentIDs = new ArrayList<>();
         this.sentThisTick = new ArrayList<>();
         this.waitThisTimeStep = false;
-
         assignedVertexID = -1;
         assignedOutgoingEdgeID = -1;
         originVertexID = -1;
         originOutgoingEdgeID = -1;
     }
 
-    public void makeObservations() {
+    /*
+        ////////////////
+        PHASE ONE LOGIC
+        ////////////////
+     */
+
+    public void makeFirstPhaseObservations() {
+        //Observe neighbors and their positions
         ArrayList<GeometricCycleLatticeRobot> neighbors = self.getNeighbors();
-        observations.clear();
+        phaseOneObservations.clear();
         if(neighbors == null || neighbors.isEmpty()) {
-            observations = new HashMap<>();
+            phaseOneObservations = new HashMap<>();
             return;
         }
 
         RigidBodyTransformation globalToLocal = new RigidBodyTransformation(self.getPosition()).inverse();
+
+        //Check if pendingChild has left communication range; if cyclebuilder, check if someone occupies my spot
         boolean childHasLeft = true;
         OrientedPoint myAssignment = getAssignedLocalPosition();
+
         for(GeometricCycleLatticeRobot neighbor : neighbors) {
             if(neighbor.getRobotId() == pendingChildID) {
                 childHasLeft = false;
             }
             if(role == CycleRole.cycleBuilder) {
                 OrientedPoint neighborPosition = globalToLocal.apply(neighbor.getPosition());
+                //EDIT FOR PROPER ANGLE PRESERVATION (NEW ANGLE PRESERVATION EXISTS)
+                // "My assignment is already occupied" fires on position coincidence
+                // alone. neighborPosition now carries the neighbor's heading in this
+                // robot's frame, so occupancy can require a pose match.
                 if(MathUtils.isZero(myAssignment.distance(neighborPosition), MathUtils.EPSILON)) {
                     forwardRejectionToParent(false);
                     resetToUnassigned();
                     hasBeenAssigned = false;
                     self.clearEdges();
                     log("-> Assignment already occupied. Forwarding rejection to parent.");
+                    return;
                 }
             }
+            // The neighbor's declared target, in its own frame -- see Observation's
+            // three-argument constructor. Null for anything without a live assignment.
             Observation obs = new Observation(neighbor, globalToLocal);
-            observations.put(neighbor.getRobotId(), obs);
+            phaseOneObservations.put(neighbor.getRobotId(), obs);
         }
 
         if(childHasLeft && pendingChildID != -1) {
@@ -121,6 +144,8 @@ public class CyclebuilderComms extends CommunicationSystem {
             pendingChildEdge = null;
             pendingChildID = -1; // HAS MUTATED STATE
         }
+
+
     }
 
     @Override
@@ -208,6 +233,17 @@ public class CyclebuilderComms extends CommunicationSystem {
                         forwardRejectionToParent(true);
                         resetToUnassigned();
                         log("-> assignment is retryable, will attempt to reassign");
+                    } else if(isChainRoot(rm.getSenderId())) {
+                        // Never ban the chain's root. unableToDoAssignmentIDs gates only the
+                        // cycle-closing test at the top of findBestNeighborForEdge -- the
+                        // general candidate loop underneath it already excludes the root by
+                        // id -- so banning the root buys nothing when the mismatch is real
+                        // (a genuinely misplaced root fails that closure test on its own)
+                        // and forfeits the close permanently when the mismatch was merely
+                        // numerical. Nothing short of a reset clears the ban and this robot
+                        // stays a cycleBuilder, so from that point on it could only ever
+                        // pick a stranger for the closing edge and drive it onto the root.
+                        log("-> assignment is NOT retryable, but sender is the chain root; not banning it, will retry the close");
                     } else {
                         unableToDoAssignmentIDs.add(rm.getSenderId()); // HAS MUTATED STATE (single-edge-scoped for cycleBuilder, unlike root's equivalent below)
                         log("-> assignment is NOT retryable, will not attempt to reassign");
@@ -373,8 +409,8 @@ public class CyclebuilderComms extends CommunicationSystem {
         return "N/A (Unhandled message type)";
     }
 
-    public void broadcastMessage(boolean alreadyInPosition) {
-        broadcastMessage(alreadyInPosition, -1);
+    public void sendMessage(boolean alreadyInPosition) {
+        sendMessage(alreadyInPosition, -1);
     }
 
     /**
@@ -387,7 +423,7 @@ public class CyclebuilderComms extends CommunicationSystem {
      * context; it does not affect behavior. Pass {@code -1} when no tick
      * context is available.</p>
      */
-    public String broadcastMessage(boolean alreadyInPosition, int tick) {
+    public String sendMessage(boolean alreadyInPosition, int tick) {
         switch (role) {
             case CycleRole.root: {
                 if(pendingChildID != -1) {
@@ -467,6 +503,248 @@ public class CyclebuilderComms extends CommunicationSystem {
             default:
                 return "N/A (Unhandled)";
         }
+    }
+
+    /*
+        ////////////////////////
+        ASSIGNMENT CONTENTION
+        ////////////////////////
+     */
+
+    /**
+     * Re-observes neighbours for phase two.
+     *
+     * <p>Uses the same frame convention as {@link #makeFirstPhaseObservations()} --
+     * this robot's <em>actual</em> pose. That matters: an incoming claim is converted
+     * into this robot's frame by composing it with the observation of its sender, so the
+     * observation and this robot's own assigned local pose must live in one frame or the
+     * comparison is meaningless.
+     *
+     * <p>Separate observations rather than reusing phase one's, because a tick of motion
+     * happens in between and every relative pose has moved.
+     */
+    public void makeSecondPhaseObservations() {
+        ArrayList<GeometricCycleLatticeRobot> neighbors = self.getNeighbors();
+        phaseTwoObservations.clear();
+        if(neighbors == null || neighbors.isEmpty()) {
+            return;
+        }
+
+        RigidBodyTransformation globalToLocal = new RigidBodyTransformation(self.getPosition()).inverse();
+        for(GeometricCycleLatticeRobot neighbor : neighbors) {
+            phaseTwoObservations.put(neighbor.getRobotId(), new Observation(neighbor, globalToLocal));
+        }
+    }
+
+    /**
+     * This robot's assigned pose expressed in its own frame -- the form it can declare
+     * to neighbors without either side needing a shared origin. Null whenever there is
+     * nothing to declare: {@code root} and {@code stable} are static anchors (their
+     * "target" is wherever they already are, and a neighbor heading onto one of them is
+     * already caught by the occupancy check in
+     * {@link #makeFirstPhaseObservations()}), and an unassigned robot has no target.
+     *
+     * <p>Deliberately distinct from {@link #getAssignedLocalPosition()}, which
+     * substitutes the origin when there is no live assignment. That substitution is
+     * harmless for a self-query but would be a false claim on this robot's own position
+     * if handed to a neighbor.
+     *
+     * @return the assigned pose in this robot's local frame, or null if there is none
+     */
+    public OrientedPoint getClaimedLocalTarget() {
+        if (role != CycleRole.cycleBuilder) {
+            return null;
+        }
+
+        OrientedPoint globalTarget = getAssignedGlobalPosition();
+        if (globalTarget == null) {
+            return null;
+        }
+
+        return new RigidBodyTransformation(self.getPosition()).inverse().apply(globalTarget);
+    }
+
+    /**
+     * Re-expresses a neighbour's claim in this robot's own frame.
+     * @param senderInMyFrame where this robot observes the sender
+     * @param claimInSenderFrame the target the sender declared, in the sender's own frame
+     * @return the sender's declared target, in this robot's frame
+     */
+    static OrientedPoint claimInMyFrame(OrientedPoint senderInMyFrame, OrientedPoint claimInSenderFrame) {
+        return new RigidBodyTransformation(senderInMyFrame).apply(claimInSenderFrame);
+    }
+
+    /**
+     * Ages every claim heard from a neighbour by one phase and drops any that have
+     * expired. The host calls this once at the start of each phase.
+     */
+    public void expireStaleClaims() {
+        ageClaims(CLAIM_TTL_PHASES);
+    }
+
+    /**
+     * Broadcasts this robot's target to every neighbour in range, if it has one to
+     * declare. Called once per tick regardless of phase: robots activate staggered and
+     * asynchronously, so one robot's phase two routinely lands during a neighbour's phase
+     * one, and emitting only in phase two would silently drop claims to that drift.
+     *
+     * @return a description of what was emitted, or null if there was nothing to declare
+     */
+    public String broadcastTargetClaim() {
+        OrientedPoint claim = getClaimedLocalTarget();
+        if (claim == null) {
+            return null;
+        }
+        HalfEdge assignedEdge = getAssignedEdge();
+        if (assignedEdge == null) {
+            log("-> no assigned edge, cannot broadcast claim");
+            return "N/A (No assigned edge, cannot broadcast claim)";
+        }
+        int targetRoleID = getCurrentRole().getId();
+
+        broadcast(new TargetClaimMessage(self.getRobotId(), claim, targetRoleID));
+        return "Broadcast target claim " + claim;
+    }
+
+    /** True if (aParked, aID) outranks (bParked, bID): possession first, then lower id. */
+    private boolean outranks(boolean aParked, int aID, boolean bParked, int bID) {
+        if (aParked != bParked) return aParked;
+        return aID < bID;
+    }
+    /**
+     * Whether a claim declares its sender already standing on the spot it claims.
+     *
+     * <p>Must be handed the claim in its <em>sender's own</em> frame -- the form it is
+     * transmitted in -- not the version composed into this robot's frame. A sender standing
+     * on its target declares exactly the origin, and the origin is fixed by a change of
+     * frame, so possession is the one thing in a claim that survives transport with no
+     * observation error on it. Recovering it after the composition instead, from the gap
+     * between the sender's observed pose and its claim in this frame, would measure a tick
+     * of drift -- order gamma -- against a tolerance of {@link MathUtils#EPSILON}, and so
+     * report "still moving" for a robot that has been parked for minutes.
+     *
+     * <p>Position only, deliberately: a robot part-way through its final rotation is
+     * standing on the spot and occupying it, whatever its heading.
+     *
+     * @param claimInOwnFrame a claim, in the frame of the robot that made it
+     * @return true if the claiming robot is already at the pose it claims
+     */
+    private boolean isParked(OrientedPoint claimInOwnFrame) {
+        return MathUtils.isZero(claimInOwnFrame.distance(new OrientedPoint(0, 0, 0)));
+    }
+
+    /**
+     * Detects two robots converging on the same lattice spot -- the failure mode when two
+     * roots independently hand out the same position -- and resolves it before either has
+     * arrived.
+     *
+     * <p>Each neighbour broadcasts its target (see {@link #broadcastTargetClaim()}); this
+     * compares those declarations against this robot's own. The predicate is symmetric:
+     * once both robots hold each other's claim they compare the same pair of points and
+     * reach the same verdict, so the tie-break below picks exactly one winner.
+     * Inferring intent from observed motion would not be symmetric -- each robot would
+     * test the other's trajectory against a <em>different</em> target, so both could
+     * yield, or neither.
+     *
+     * <p>That tie-break is a total order over {@code (parked, id)} -- see
+     * {@link #outranks(boolean, int, boolean, int)}. Possession comes first because id
+     * alone has no notion of who is already there: an arrived robot holding the higher id
+     * would tear itself down, rejecting to its parent and dropping its subtree, in favour
+     * of an interloper that had not got there yet. Possession is read off a claim
+     * <em>before</em> it is transformed into this frame, via {@link #isParked}, for the
+     * reason given there.
+     *
+     * <p>Symmetry is a property of the steady state, not of any single phase. In the first
+     * phase two after an assignment lands, whichever robot activates earlier may not have
+     * heard its rival yet and will keep the spot; the rival yields on its own turn, or one
+     * time step later if neither had emitted in time. Contention therefore resolves within
+     * two time steps rather than one. Closing that window entirely would need a global
+     * barrier between emission and evaluation, which is precisely what the asynchronous
+     * scheduler rules out -- but the gap only ever delays a yield, never produces two.
+     *
+     * <p>This is early warning, not the guarantee. A claim that was lost
+     * or arrived too late leaves the occupancy check in
+     * {@link #makeFirstPhaseObservations()} as the backstop, so the worst case degrades to
+     * the previous behaviour rather than to an overlap.
+     *
+     * @return a description of the contention for the tick log, or null if there was none
+     */
+    public String detectAssignmentContention() {
+        OrientedPoint myClaim = getClaimedLocalTarget();
+        if (myClaim == null) {
+            return null;
+        }
+
+        boolean iAmParked = isParked(myClaim);
+
+        // The maximum possible distance a robot can move in one tick/phase; radius of the "contention zone" around a lattice spot. If two robots individual
+        // claims fall within this distance, they can be consider equal if their claimed role IDS are the same.
+        double gamma = self.getMaxSpeed() * (0.5) * GeometricCycleLatticeRobot.TIME_STEP;
+
+        // Resolve against the strongest rival rather than the first one found: iteration
+        // order over the claim map must not decide who keeps the assignment. "Strongest"
+        // is parked-before-moving, then lowest id.
+        int bestRivalID = -1;
+        boolean bestRivalParked = false;
+        for (ClaimEntry entry : incomingClaims.values()) {
+            int senderID = entry.claim().getSenderId();
+
+            // The claim arrives in its sender's frame; the observation locates that
+            // sender in ours. Composing them gives the sender's target in our frame:
+            //   (T_self^-1 * T_sender) * (T_sender^-1 * T_target) = T_self^-1 * T_target
+            // Both halves are local -- one communicated, one sensed -- so no shared
+            // origin is assumed anywhere.
+            Observation obs = phaseTwoObservations.get(senderID);
+            if (obs == null) {
+                continue;
+            }
+
+            OrientedPoint claimInSenderFrame = entry.claim().getClaimInSenderFrame();
+            OrientedPoint theirClaim = claimInMyFrame(obs.getLocalPosition(), claimInSenderFrame);
+            
+            if (!MathUtils.isPointInBoundingCircle(myClaim, gamma, theirClaim)
+                    || entry.claim().getTargetRoleID() != getCurrentRole().getId()) {
+                continue;
+            }
+
+            // Read off the claim as it arrived, before the frame change above -- see
+            // isParked. The rival is a genuine contender for this spot either way; this
+            // only decides which of us gives it up.
+            boolean rivalParked = isParked(claimInSenderFrame);
+
+            if (bestRivalID == -1 || outranks(rivalParked, senderID, bestRivalParked, bestRivalID)) {
+                bestRivalID = senderID;
+                bestRivalParked = rivalParked;
+            }
+        }
+
+        if (bestRivalID == -1) {
+            return null;
+        }
+
+        if (!outranks(bestRivalParked, bestRivalID, iAmParked, self.getRobotId())) {
+            boolean heldByPossession = iAmParked && !bestRivalParked;
+            log("-> Contention with robot " + bestRivalID + " over my assignment. "
+                    + (heldByPossession ? "I am already parked on it" : "I hold the lower id")
+                    + "; keeping it.");
+            return "Assignment contention with robot " + bestRivalID
+                    + (heldByPossession ? " (KEPT, parked)" : " (KEPT, lower id)");
+        }
+
+        // Not retryable: this robot genuinely cannot take this spot, so the parent should
+        // record that and offer the edge to a different candidate rather than re-offering
+        // it here. forwardRejectionToParent must run first -- resetToUnassigned clears the
+        // chainMemberList it reads the parent from.
+        forwardRejectionToParent(false);
+        resetToUnassigned();
+        hasBeenAssigned = false;
+        self.clearEdges();
+        boolean lostToPossession = bestRivalParked && !iAmParked;
+        log("-> Contention with robot " + bestRivalID + " over my assignment. "
+                + (lostToPossession ? "It is already parked there" : "I hold the higher id")
+                + "; yielding and forwarding rejection to parent.");
+        return "Assignment contention with robot " + bestRivalID
+                + (lostToPossession ? " (YIELDED, rival parked)" : " (YIELDED, higher id)");
     }
 
     //MESSAGE-PROCESSING UTIL
@@ -566,6 +844,19 @@ public class CyclebuilderComms extends CommunicationSystem {
         return null;
     }
 
+    /**
+     * Whether the given robot is the root of this robot's current chain. Guards the
+     * empty-chain case, which a cycleBuilder holds briefly between resetToCycleBuilder()
+     * and the caller's own chainMemberList assignment, and which an unassigned robot
+     * holds permanently.
+     *
+     * @param robotID the id to test
+     * @return true if the chain is non-empty and this id is its root
+     */
+    private boolean isChainRoot(int robotID) {
+        return !chainMemberList.isEmpty() && chainMemberList.getRootID() == robotID;
+    }
+
     private GeometricCycleLatticeRobot findBestNeighborForEdge(HalfEdge targetEdge) {
         OrientedPoint targetLocal  = getTargetInLocalCoordinates(targetEdge);
             log("Beginning decision process");
@@ -573,8 +864,12 @@ public class CyclebuilderComms extends CommunicationSystem {
         int rootID = chainMemberList.isEmpty() ? -1 : chainMemberList.getRootID();
 
         // Root is only a candidate if it's not banned/parent, and check it separately from the rest
-        Observation rootObs = observations.get(rootID);
+        Observation rootObs = phaseOneObservations.get(rootID);
         if (rootObs != null && !unableToDoAssignmentIDs.contains(rootID)) {
+            //EDIT FOR PROPER ANGLE PRESERVATION (NEW ANGLE PRESERVATION EXISTS)
+            // Cycle closure on position alone. Both operands now carry meaningful
+            // headings -- targetLocal from the edge's voltage, rootObs from the
+            // observation -- so this can become a pose match rather than a point match.
             double rootDistance = targetLocal.distance(rootObs.getLocalPosition());
             if (MathUtils.isZero(rootDistance, MathUtils.EPSILON)) {
                 log("-> root is exactly at target position, closing cycle");
@@ -586,7 +881,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         ArrayList<Observation> validObservations = new ArrayList<>();
         ArrayList<Observation> priorityObservations = new ArrayList<>();
 
-        for (Observation obs : observations.values()) {
+        for (Observation obs : phaseOneObservations.values()) {
             int robotID = obs.getId();
             if (robotID != rootID && !chainMemberList.isInList(robotID) && !unableToDoAssignmentIDs.contains(robotID)) {
                 // A neighbor already sitting exactly at the target position must win outright,
@@ -596,6 +891,9 @@ public class CyclebuilderComms extends CommunicationSystem {
                 // and this is exactly the case -- an already-placed neighbor from an adjoining
                 // face/edge -- that must be picked to avoid placing a duplicate robot on top
                 // of it.
+                //EDIT FOR PROPER ANGLE PRESERVATION (NEW ANGLE PRESERVATION EXISTS)
+                // Position-only match, as above: a neighbor sitting on the right spot
+                // with the wrong heading is currently reused as though it fit.
                 if (MathUtils.isZero(targetLocal.distance(obs.getLocalPosition()), MathUtils.EPSILON)) {
                     log("-> " + robotID + " is exactly at target position, closing onto existing neighbor");
                     return getNeighborByID(robotID);
@@ -611,7 +909,7 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         int bestNeighborID = -1;
         double smallestDistance = Double.MAX_VALUE;
-        
+
         if(!priorityObservations.isEmpty()) {
             validObservations = priorityObservations;
         }
@@ -640,7 +938,8 @@ public class CyclebuilderComms extends CommunicationSystem {
         //Point of candidate
         OrientedPoint p3 = new OrientedPoint(obs.getLocalPosition());
         //Point of future target
-        OrientedPoint p4 = MathUtils.vectorSum(p2, getTargetInLocalCoordinates(inferNextEdge(targetEdge)));
+        //EDIT FOR PROPER ANGLE PRESERVATION (NEW ANGLE PRESERVATION EXISTS)
+        OrientedPoint p4 = Vec2.of(p2).plus(Vec2.of(getTargetInLocalCoordinates(inferNextEdge(targetEdge)))).asOrientedPoint();
         //Point of parent
         OrientedPoint p5 = getTargetInLocalCoordinates(getAssignedEdge().getTwin());
 
@@ -655,7 +954,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     private OrientedPoint getTargetInLocalCoordinates(HalfEdge edge) {
-        return edge.getVoltage().apply(new OrientedPoint(0, 0, 0));
+        return edge.getVoltage().asPose();
     }
 
     private boolean checkAssignmentForCurrentPosition(PositioningMessage pm) {
@@ -665,17 +964,13 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         log("Assigned local position is: " + localAssignment);
 
-        // Self, expressed in self's own frame, is always exactly the origin --
-        // not just approximately so for zero-rotation edges, as computing it
-        // via RigidBodyTransformation(self).inverse().apply(self) would give
-        // (RigidBodyTransformation.apply() discards the input point's own
-        // orientation, so that formula silently returned (0, 0, -selfOrientation)
-        // instead of (0, 0, 0) whenever self's orientation was nonzero).
+        // Self, expressed in self's own frame, is exactly the origin.
         OrientedPoint positionInLocal = new OrientedPoint(0, 0, 0);
 
+        //EDIT FOR PROPER ANGLE PRESERVATION (NEW ANGLE PRESERVATION EXISTS)
         return MathUtils.approxEquals(localAssignment.x, positionInLocal.getX(), MathUtils.REASSIGNMENT_POSITION_EPSILON)
                 && MathUtils.approxEquals(localAssignment.y, positionInLocal.getY(), MathUtils.REASSIGNMENT_POSITION_EPSILON)
-                && MathUtils.isZero(MathUtils.angleDifference(localAssignment.getOrientation(), positionInLocal.getOrientation()));
+                && MathUtils.isZero(MathUtils.angleDifference(localAssignment.getOrientation(), positionInLocal.getOrientation()), MathUtils.REASSIGNMENT_ANGLE_EPSILON);
     }
 
     /**
@@ -760,9 +1055,8 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     public void promoteToPrimaryRoot() {
-        role = CycleRole.root; // HAS MUTATED STATE (partial -- unlike the PromotionMessage path above, this touches nothing else: pendingChildID/chainMemberList/unableToDoAssignmentIDs/stableID are left as whatever they were)
+        role = CycleRole.root;
         initializeEdgeMap();
-
     }
 
     private void promoteSelfToStable() {
@@ -816,7 +1110,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         if (parent == null) return null;
 
         return globalTransformOf(parent.getPosition(), assignedEdge.getVoltage())
-                .apply(new OrientedPoint(0, 0, 0));
+                .asPose();
     }
 
     private OrientedPoint getAssignedLocalPosition() {
@@ -842,18 +1136,19 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         return new RigidBodyTransformation(self.getPosition()).inverse()
                 .compose(assignedGlobalTransform)
-                .apply(new OrientedPoint(0, 0, 0));
+                .asPose();
     }
 
     /**
-     * Composes a base pose with a transform relative to it (e.g. an edge's
-     * voltage) into the resulting global transform, correctly accumulating
-     * rotation. RigidBodyTransformation.apply() discards the orientation of
-     * whatever point it's given, so chaining via
-     * {@code new RigidBodyTransformation(basePose).apply(relative.apply(origin))}
-     * silently drops any rotation `relative` carries -- invisible for
-     * square/hex, where every edge's rotation is zero, but wrong for
-     * octagon-square, where it usually isn't.
+     * Composes a base pose with a transform relative to it (e.g. an edge's voltage)
+     * into the resulting global transform, accumulating rotation along the way.
+     *
+     * <p>This originally existed to route around
+     * {@code RigidBodyTransformation.apply()} discarding the orientation of whatever
+     * point it was given. That is fixed -- {@code apply()} now composes the pose's own
+     * heading -- so the workaround is no longer load-bearing. Composing transforms and
+     * reading the result once with {@code asPose()} is still the clearer spelling than
+     * chaining point-applications, so the method stays.
      */
     private static RigidBodyTransformation globalTransformOf(OrientedPoint basePose, RigidBodyTransformation relative) {
         return new RigidBodyTransformation(basePose).compose(relative);
@@ -864,7 +1159,6 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.pendingChildEdge = null;
         this.chainMemberList = new ChainMemberList();
         this.role = CycleRole.unassigned;
-        this.observations = new HashMap<>();
         unableToDoAssignmentIDs.clear();
 
         this.assignedVertexID = -1;
@@ -872,16 +1166,14 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         this.originVertexID = -1;
         this.originOutgoingEdgeID = -1;
+
+        resetObservations();
     }
 
-    // --- Role-scoped resets (draft) -----------------------------------------
-    //
-    // Not called anywhere yet. Each one answers "what does a clean slate for
-    // role X look like" -- as opposed to reset() above, which is really
-    // "clean slate for unassigned" under a role-agnostic name. Every existing
-    // site in this file that partially mutates the same fields is marked
-    // "HAS MUTATED STATE" so it's easy to compare against what these would do
-    // and decide whether it should be swapped in.
+    public void resetObservations() {
+        this.phaseOneObservations.clear();
+        this.phaseTwoObservations.clear();
+    }
 
     /**
      * Clean slate for "unassigned": stableID, pendingChildID, chainMemberList,
@@ -954,7 +1246,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     /**
      * Clears the record of messages sent since the last call. Must be called
      * once at the very start of each robot activation (before processMessages
-     * / broadcastMessage run for that tick) so that {@link #sentThisTick()}
+     * / sendMessage run for that tick) so that {@link #sentThisTick()}
      * reflects only messages sent during the current tick.
      */
     public void beginTick() {
@@ -986,14 +1278,12 @@ public class CyclebuilderComms extends CommunicationSystem {
                 getOriginEdge(),
                 Map.copyOf(completedCycles),
                 snapshotQueueInOrder(),
-                Map.copyOf(observations),
+                Map.copyOf(phaseOneObservations),
                 List.copyOf(unableToDoAssignmentIDs)
         );
     }
 
     private List<AbstractMessage> snapshotQueueInOrder() {
-        // PriorityBlockingQueue's own iterator makes no ordering guarantee,
-        // so copy out and sort a snapshot instead of trusting iteration order.
         List<AbstractMessage> copy = new ArrayList<>(incomingMessages);
         return copy;
     }
@@ -1008,6 +1298,22 @@ public class CyclebuilderComms extends CommunicationSystem {
         recipient.enqueueMessage(msg);
         sentThisTick.add(new OutgoingMessageRecord(
                 recipient.getRobotId(), msg.getMessageType(), String.valueOf(msg)));
+    }
+
+    /**
+     * Emits a claim to every neighbour in range.
+     *
+     * <p>Logged as a <em>single</em> outgoing record, not one per neighbour: a radio
+     * broadcast is one transmission that everyone in range happens to hear, and counting
+     * it N times would overstate the protocol's communication cost by the neighbour
+     * degree.
+     */
+    private void broadcast(TargetClaimMessage msg) {
+        for (GeometricCycleLatticeRobot neighbor : self.getNeighbors()) {
+            neighbor.receiveClaim(msg);
+        }
+        sentThisTick.add(new OutgoingMessageRecord(
+                AbstractMessage.BROADCAST, msg.getMessageType(), String.valueOf(msg)));
     }
 
     private void log(String msg) {

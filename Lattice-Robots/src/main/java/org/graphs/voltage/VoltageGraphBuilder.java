@@ -50,7 +50,12 @@ public final class VoltageGraphBuilder {
      * convention). Returns h; the twin is h.getTwin().
      */
     public HalfEdge addHalfEdgePair(Role from, Role to, OrientedPoint toPoseRelativeToFrom) {
-        RigidBodyTransformation voltage = new RigidBodyTransformation(from.getPose(), toPoseRelativeToFrom);
+        // Single-arg, not (from.getPose(), toPoseRelativeToFrom): the argument is
+        // already expressed in `from`'s frame, so the two-arg constructor would
+        // subtract `from`'s pose a second time. Identical for every lattice declared
+        // so far -- every role that originates an edge sits at the origin -- but
+        // wrong the moment one does not.
+        RigidBodyTransformation voltage = new RigidBodyTransformation(toPoseRelativeToFrom);
 
         HalfEdge h = new HalfEdge(nextHalfEdgeId++, from, voltage);
         HalfEdge twin = new HalfEdge(nextHalfEdgeId++, to, voltage.inverse());

@@ -50,7 +50,8 @@ public class AsyncRobotPanel extends JPanel {
     // ------------------------------------------------------------------
     private static final int  RENDER_FPS         = 30;
     private static final long RENDER_PERIOD_MS    = 1000L / RENDER_FPS;
-    private static final long DEFAULT_PERIOD_MS   = 1000L;
+    private static final long DEFAULT_PERIOD_MS   = GeometricCycleLatticeRobot.TICK_RATE > 0.0
+            ? (long) (1000.0 / GeometricCycleLatticeRobot.TICK_RATE) : 1000L;
     private static final long PROXIMITY_PERIOD_MS = 100L;
 
     // ------------------------------------------------------------------
@@ -318,6 +319,7 @@ public class AsyncRobotPanel extends JPanel {
 
     private void startSimulation() {
         if (robots.isEmpty()) return;
+
         int threads = Runtime.getRuntime().availableProcessors() + 1;
         executor = new ScheduledThreadPoolExecutor(threads);
         executor.setRemoveOnCancelPolicy(true);
