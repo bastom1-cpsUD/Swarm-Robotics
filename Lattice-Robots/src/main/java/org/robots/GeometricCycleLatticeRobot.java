@@ -304,10 +304,6 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
         commsSystem.setTrustLevel(trust);
     }
 
-    public void promoteToRoot() {
-        commsSystem.promoteToPrimaryRoot();
-    }
-
     public void promoteToPrimaryRoot() {
         commsSystem.promoteToPrimaryRoot();
     }
