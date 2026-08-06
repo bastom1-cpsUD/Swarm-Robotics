@@ -1,5 +1,6 @@
 package org.graphs.voltage;
 
+import org.graphs.util.OrientedPoint;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -30,6 +31,46 @@ class VoltageGraphsTest {
         VoltageGraph graph = HexagonVoltageGraph.build();
         assertEquals(1, graph.getFaces().size());
         assertEquals(6, graph.getFaces().get(0).getCycleLength());
+    }
+
+    @Test
+    @DisplayName("TriangleVoltageGraph: one role, six half-edges, two three-step faces")
+    void triangleVoltageGraph_hasTwoThreeStepFaces() {
+        VoltageGraph graph = TriangleVoltageGraph.build();
+
+        assertEquals(1, graph.getRoles().size());
+        Role role = graph.getPrimaryRole();
+        // Three declared pairs -- three outgoing edges plus their three twins,
+        // all originating at the same role, giving the vertex its six neighbors.
+        assertEquals(6, graph.getOutgoingHalfEdges(role).size());
+
+        // Two faces: the "up" and "down" triangles.
+        assertEquals(2, graph.getFaces().size());
+        for (Face face : graph.getFaces()) {
+            assertEquals(3, face.getCycleLength());
+            List<HalfEdge> boundary = face.getBoundary();
+            assertEquals(3, boundary.size());
+            assertEquals(3, Set.copyOf(boundary).size());
+            assertTrue(graph.validateCycle(boundary));
+        }
+
+        // The two faces partition the six half-edges -- no edge borders both.
+        Set<HalfEdge> covered = graph.getFaces().stream()
+                .flatMap(f -> f.getBoundary().stream())
+                .collect(Collectors.toSet());
+        assertEquals(6, covered.size());
+    }
+
+    @Test
+    @DisplayName("TriangleVoltageGraph: every edge is a pure translation of the same length")
+    void triangleVoltageGraph_everyEdgeIsPureTranslation() {
+        VoltageGraph graph = TriangleVoltageGraph.build();
+
+        for (HalfEdge h : graph.getOutgoingHalfEdges(graph.getPrimaryRole())) {
+            assertEquals(0.0, h.getVoltage().getRotation(), 1e-9);
+            OrientedPoint step = h.getVoltage().asPose();
+            assertEquals(50.0, Math.hypot(step.x, step.y), 1e-9);
+        }
     }
 
     @Test
