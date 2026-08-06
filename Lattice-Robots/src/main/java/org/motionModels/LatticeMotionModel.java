@@ -23,5 +23,7 @@ public interface LatticeMotionModel {
      * @return true if the robot reached its target destination, false otherwise
      */
     boolean moveTo(OrientedPoint currentPose, OrientedPoint newPose, double dt);
+
+    public double getMaxSpeed();
     
 }

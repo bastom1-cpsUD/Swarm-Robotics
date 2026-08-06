@@ -30,10 +30,12 @@ import org.graphs.util.OrientedPoint;
 public class TargetClaimMessage extends AbstractMessage {
 
     private final OrientedPoint claimInSenderFrame;
+    private final int targetRoleID;
 
-    public TargetClaimMessage(int senderId, OrientedPoint claimInSenderFrame) {
+    public TargetClaimMessage(int senderId, OrientedPoint claimInSenderFrame, int targetRoleID) {
         super(senderId, BROADCAST);
         this.claimInSenderFrame = claimInSenderFrame;
+        this.targetRoleID = targetRoleID;
     }
 
     /**
@@ -57,10 +59,15 @@ public class TargetClaimMessage extends AbstractMessage {
         return Integer.MAX_VALUE;
     }
 
+    public int getTargetRoleID() {
+        return targetRoleID;
+    }
+
     @Override
     public String toString() {
         return super.toString() + "\n"
-            + "Claimed Pose (sender frame): " + claimInSenderFrame;
+            + "Claimed Pose (sender frame): " + claimInSenderFrame
+            + "\nClaimed Target Role ID: " + targetRoleID;
     }
 
     @Override
@@ -77,11 +84,12 @@ public class TargetClaimMessage extends AbstractMessage {
 
         TargetClaimMessage other = (TargetClaimMessage) o;
 
-        return java.util.Objects.equals(claimInSenderFrame, other.getClaimInSenderFrame());
+        return java.util.Objects.equals(claimInSenderFrame, other.getClaimInSenderFrame()) &&
+                targetRoleID == other.getTargetRoleID();
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(super.hashCode(), claimInSenderFrame);
+        return java.util.Objects.hash(super.hashCode(), claimInSenderFrame, targetRoleID);
     }
 }

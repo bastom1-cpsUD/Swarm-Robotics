@@ -164,6 +164,18 @@ public final class MathUtils {
         return sigma > 0.0 ? 1 : -1;
     }
 
+    /**
+     * Determines if a point falls within a bounding circle defined by a center and radius.
+     * @param center the center of the bounding circle
+     * @param radius the radius of the bounding circle
+     * @param point the point to test
+     * @return true if the point is within the bounding circle, false otherwise
+     */
+    public static boolean isPointInBoundingCircle(OrientedPoint center, double radius, OrientedPoint point) {
+        double dx = point.getX() - center.getX();
+        double dy = point.getY() - center.getY();
+        return dx * dx + dy * dy <= radius * radius;
+    }
     public static void main(String[] args) {
         OrientedPoint p1 = new OrientedPoint(0,0,0);
         OrientedPoint p2 = new OrientedPoint(2, 5, 0);

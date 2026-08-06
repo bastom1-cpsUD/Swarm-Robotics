@@ -46,6 +46,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
      * (message passing) then phase two (assignment reconciliation).
      */
     public static final double TICK_RATE = 1.0;
+    public static final double TIME_STEP = 0.5 * TICK_RATE;
     public static final VoltageGraph GRAPH = SnubSquareVoltageGraph.build();
     // ------------------------------------------------------------
     // Fields
@@ -313,6 +314,10 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
 
     public boolean isMovingToAssignedPosition() {
         return isMovingToAssignedPosition;
+    }
+
+    public double getMaxSpeed() {
+        return latticeMotionModel.getMaxSpeed();
     }
 
     // ------------------------------------------------------------

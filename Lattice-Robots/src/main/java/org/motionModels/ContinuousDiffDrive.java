@@ -240,4 +240,8 @@ public class ContinuousDiffDrive extends MotionModel {
     private boolean isZero(double value) {
         return Math.abs(value) < 1e-9;
     }
+
+    public double getMaxSpeed() {
+        return MAX_LINEAR_SPEED;
+    }
 }

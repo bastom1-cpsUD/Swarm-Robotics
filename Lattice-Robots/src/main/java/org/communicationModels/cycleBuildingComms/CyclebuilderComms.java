@@ -595,9 +595,42 @@ public class CyclebuilderComms extends CommunicationSystem {
         if (claim == null) {
             return null;
         }
+        HalfEdge assignedEdge = getAssignedEdge();
+        if (assignedEdge == null) {
+            log("-> no assigned edge, cannot broadcast claim");
+            return "N/A (No assigned edge, cannot broadcast claim)";
+        }
+        int targetRoleID = getCurrentRole().getId();
 
-        broadcast(new TargetClaimMessage(self.getRobotId(), claim));
+        broadcast(new TargetClaimMessage(self.getRobotId(), claim, targetRoleID));
         return "Broadcast target claim " + claim;
+    }
+
+    /** True if (aParked, aID) outranks (bParked, bID): possession first, then lower id. */
+    private boolean outranks(boolean aParked, int aID, boolean bParked, int bID) {
+        if (aParked != bParked) return aParked;
+        return aID < bID;
+    }
+    /**
+     * Whether a claim declares its sender already standing on the spot it claims.
+     *
+     * <p>Must be handed the claim in its <em>sender's own</em> frame -- the form it is
+     * transmitted in -- not the version composed into this robot's frame. A sender standing
+     * on its target declares exactly the origin, and the origin is fixed by a change of
+     * frame, so possession is the one thing in a claim that survives transport with no
+     * observation error on it. Recovering it after the composition instead, from the gap
+     * between the sender's observed pose and its claim in this frame, would measure a tick
+     * of drift -- order gamma -- against a tolerance of {@link MathUtils#EPSILON}, and so
+     * report "still moving" for a robot that has been parked for minutes.
+     *
+     * <p>Position only, deliberately: a robot part-way through its final rotation is
+     * standing on the spot and occupying it, whatever its heading.
+     *
+     * @param claimInOwnFrame a claim, in the frame of the robot that made it
+     * @return true if the claiming robot is already at the pose it claims
+     */
+    private boolean isParked(OrientedPoint claimInOwnFrame) {
+        return MathUtils.isZero(claimInOwnFrame.distance(new OrientedPoint(0, 0, 0)));
     }
 
     /**
@@ -608,10 +641,18 @@ public class CyclebuilderComms extends CommunicationSystem {
      * <p>Each neighbour broadcasts its target (see {@link #broadcastTargetClaim()}); this
      * compares those declarations against this robot's own. The predicate is symmetric:
      * once both robots hold each other's claim they compare the same pair of points and
-     * reach the same verdict, so the id tie-break below picks exactly one winner.
+     * reach the same verdict, so the tie-break below picks exactly one winner.
      * Inferring intent from observed motion would not be symmetric -- each robot would
      * test the other's trajectory against a <em>different</em> target, so both could
      * yield, or neither.
+     *
+     * <p>That tie-break is a total order over {@code (parked, id)} -- see
+     * {@link #outranks(boolean, int, boolean, int)}. Possession comes first because id
+     * alone has no notion of who is already there: an arrived robot holding the higher id
+     * would tear itself down, rejecting to its parent and dropping its subtree, in favour
+     * of an interloper that had not got there yet. Possession is read off a claim
+     * <em>before</em> it is transformed into this frame, via {@link #isParked}, for the
+     * reason given there.
      *
      * <p>Symmetry is a property of the steady state, not of any single phase. In the first
      * phase two after an assignment lands, whichever robot activates earlier may not have
@@ -634,9 +675,17 @@ public class CyclebuilderComms extends CommunicationSystem {
             return null;
         }
 
-        // Resolve against the lowest conflicting id rather than the first one found:
-        // iteration order over the claim map must not decide who keeps the assignment.
-        int lowestConflictingID = -1;
+        boolean iAmParked = isParked(myClaim);
+
+        // The maximum possible distance a robot can move in one tick/phase; radius of the "contention zone" around a lattice spot. If two robots individual
+        // claims fall within this distance, they can be consider equal if their claimed role IDS are the same.
+        double gamma = self.getMaxSpeed() * (0.5) * GeometricCycleLatticeRobot.TIME_STEP;
+
+        // Resolve against the strongest rival rather than the first one found: iteration
+        // order over the claim map must not decide who keeps the assignment. "Strongest"
+        // is parked-before-moving, then lowest id.
+        int bestRivalID = -1;
+        boolean bestRivalParked = false;
         for (ClaimEntry entry : incomingClaims.values()) {
             int senderID = entry.claim().getSenderId();
 
@@ -649,29 +698,37 @@ public class CyclebuilderComms extends CommunicationSystem {
             if (obs == null) {
                 continue;
             }
-            OrientedPoint theirClaim = claimInMyFrame(
-                    obs.getLocalPosition(), entry.claim().getClaimInSenderFrame());
 
-            // REASSIGNMENT_POSITION_EPSILON, not EPSILON: the two claims for one spot are
-            // each derived from a different parent, and each of those parents has itself
-            // only converged to within EPSILON -- error that accumulates down the chain.
-            // The tight tolerance would miss real contention. Position only; in a valid
-            // lattice the role fixes the heading, so a genuine conflict has matching
-            // headings anyway.
-            if (MathUtils.isZero(myClaim.distance(theirClaim), MathUtils.REASSIGNMENT_POSITION_EPSILON)
-                    && (lowestConflictingID == -1 || senderID < lowestConflictingID)) {
-                lowestConflictingID = senderID;
+            OrientedPoint claimInSenderFrame = entry.claim().getClaimInSenderFrame();
+            OrientedPoint theirClaim = claimInMyFrame(obs.getLocalPosition(), claimInSenderFrame);
+            
+            if (!MathUtils.isPointInBoundingCircle(myClaim, gamma, theirClaim)
+                    || entry.claim().getTargetRoleID() != getCurrentRole().getId()) {
+                continue;
+            }
+
+            // Read off the claim as it arrived, before the frame change above -- see
+            // isParked. The rival is a genuine contender for this spot either way; this
+            // only decides which of us gives it up.
+            boolean rivalParked = isParked(claimInSenderFrame);
+
+            if (bestRivalID == -1 || outranks(rivalParked, senderID, bestRivalParked, bestRivalID)) {
+                bestRivalID = senderID;
+                bestRivalParked = rivalParked;
             }
         }
 
-        if (lowestConflictingID == -1) {
+        if (bestRivalID == -1) {
             return null;
         }
 
-        if (self.getRobotId() < lowestConflictingID) {
-            log("-> Contention with robot " + lowestConflictingID
-                    + " over my assignment. I hold the lower id; keeping it.");
-            return "Assignment contention with robot " + lowestConflictingID + " (KEPT, lower id)";
+        if (!outranks(bestRivalParked, bestRivalID, iAmParked, self.getRobotId())) {
+            boolean heldByPossession = iAmParked && !bestRivalParked;
+            log("-> Contention with robot " + bestRivalID + " over my assignment. "
+                    + (heldByPossession ? "I am already parked on it" : "I hold the lower id")
+                    + "; keeping it.");
+            return "Assignment contention with robot " + bestRivalID
+                    + (heldByPossession ? " (KEPT, parked)" : " (KEPT, lower id)");
         }
 
         // Not retryable: this robot genuinely cannot take this spot, so the parent should
@@ -682,9 +739,12 @@ public class CyclebuilderComms extends CommunicationSystem {
         resetToUnassigned();
         hasBeenAssigned = false;
         self.clearEdges();
-        log("-> Contention with robot " + lowestConflictingID
-                + " over my assignment. I hold the higher id; yielding and forwarding rejection to parent.");
-        return "Assignment contention with robot " + lowestConflictingID + " (YIELDED, higher id)";
+        boolean lostToPossession = bestRivalParked && !iAmParked;
+        log("-> Contention with robot " + bestRivalID + " over my assignment. "
+                + (lostToPossession ? "It is already parked there" : "I hold the higher id")
+                + "; yielding and forwarding rejection to parent.");
+        return "Assignment contention with robot " + bestRivalID
+                + (lostToPossession ? " (YIELDED, rival parked)" : " (YIELDED, higher id)");
     }
 
     //MESSAGE-PROCESSING UTIL

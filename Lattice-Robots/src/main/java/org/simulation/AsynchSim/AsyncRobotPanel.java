@@ -319,6 +319,7 @@ public class AsyncRobotPanel extends JPanel {
 
     private void startSimulation() {
         if (robots.isEmpty()) return;
+
         int threads = Runtime.getRuntime().availableProcessors() + 1;
         executor = new ScheduledThreadPoolExecutor(threads);
         executor.setRemoveOnCancelPolicy(true);

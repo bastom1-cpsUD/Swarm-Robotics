@@ -208,4 +208,8 @@ public class TimeStepDiffDrive extends MotionModel implements LatticeMotionModel
         this.leftAngularVel = leftAngVel;
         this.rightAngularVel = rightAngVel;
     }
+
+    public double getMaxSpeed() {
+        return MAX_LINEAR_SPEED;
+    }
 }
