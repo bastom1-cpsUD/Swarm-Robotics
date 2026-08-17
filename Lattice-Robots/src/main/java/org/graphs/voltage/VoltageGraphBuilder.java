@@ -119,10 +119,15 @@ public final class VoltageGraphBuilder {
             List<HalfEdge> targetOrder = rotationOrder.get(twin.getOrigin());
             int i = targetOrder.indexOf(twin);
             int n = targetOrder.size();
-            // next(h) = the edge immediately clockwise from twin(h): the previous
-            // entry in twin(h)'s CCW rotation order. Edmonds' rule -- see
+            // Edmonds' rule verbatim: next(h) = sigma(twin(h)), i.e. the entry
+            // AFTER twin(h) in its own role's rotation order. See
             // DCEL-Implementation-Plan.md sec 2.2.
-            HalfEdge next = targetOrder.get(Math.floorMod(i - 1, n));
+            //
+            // The direction faces end up traced is a consequence of how each
+            // lattice declares its rotation order, not something resolved here:
+            // a CCW-declared order yields clockwise faces, a CW-declared order
+            // yields counter-clockwise ones. This step is always forward.
+            HalfEdge next = targetOrder.get(Math.floorMod(i + 1, n));
             h.setNext(next);
         }
         for (HalfEdge h : allHalfEdges) {

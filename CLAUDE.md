@@ -101,8 +101,11 @@ everything else matches).
   `HexagonTriangleVoltageGraph`, `HexagonSquareTriangleVoltageGraph`,
   `DodecagonTriangleVoltageGraph`, `DodecagonHexagonSquareVoltageGraph`,
   `ElongatedTriangularVoltageGraph`) are each a small static `build()` factory using the
-  builder. Every edge is inserted in clockwise order so every face traces clockwise —
-  keep new lattices consistent with this convention.
+  builder. Every edge is inserted in clockwise order — keep new lattices consistent
+  with this convention. Face traversal direction follows from it rather than being
+  chosen: the builder applies Edmonds' rule `next(h) = σ(twin(h))` (a forward step in
+  the declared order), so a clockwise declaration traces every face
+  counter-clockwise.
 - `org.graphs.lattice` (`LatticeGraph`, `HexagonLattice`, `SquareLattice`, `Vertex`,
   `LatticeEdge`) is the **legacy** pre-voltage-graph representation described as
   "Current Architecture" in `Graphs.md`. It's superseded by `org.graphs.voltage` and

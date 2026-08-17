@@ -38,6 +38,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     // the order robots happen to activate in; short enough that a robot which went
     // unassigned and stopped emitting cannot keep provoking a phantom conflict.
     private static final int CLAIM_TTL_PHASES = 2;
+
     private HashMap<Integer, CycleStatus> completedCycles;
     private final VoltageGraph graph;
 
@@ -46,7 +47,6 @@ public class CyclebuilderComms extends CommunicationSystem {
     private int pendingChildID;
     private boolean hasBeenAssigned;
     private ChainMemberList chainMemberList;
-    private GeometricCycleLatticeRobot self;
     private CycleRole role;
     private ArrayList<Integer> unableToDoAssignmentIDs;
 
@@ -55,6 +55,8 @@ public class CyclebuilderComms extends CommunicationSystem {
     private int originVertexID;
     private int originOutgoingEdgeID;
 
+    //Simulation Support
+    private GeometricCycleLatticeRobot self;
 
     // Time-Step Data
     private HashMap<Integer, Observation> phaseOneObservations;

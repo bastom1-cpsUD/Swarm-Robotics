@@ -58,8 +58,9 @@ public final class OctagonSquareVoltageGraph {
         HalfEdge r3B = r1B.getTwin();
         HalfEdge r3C = r2A.getTwin();
 
-        // Rotation order at each role, clockwise (decreasing departure angle)
-        // so every face traces clockwise, matching the other lattice graphs.
+        // Rotation order at each role, clockwise (decreasing departure angle),
+        // matching the other lattice graphs. Under Edmonds' sigma(twin(h)) a
+        // clockwise order traces faces counter-clockwise.
         builder.setRotationOrder(r0, r0B, r0C, r0A);
         builder.setRotationOrder(r1, r1C, r1A, r1B);
         builder.setRotationOrder(r2, r2C, r2A, r2B);

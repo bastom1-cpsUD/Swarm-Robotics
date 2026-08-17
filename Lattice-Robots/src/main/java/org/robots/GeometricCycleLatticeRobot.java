@@ -24,6 +24,7 @@ import org.graphs.voltage.SnubHexagonVoltageGraph;
 import org.graphs.voltage.SnubSquareVoltageGraph;
 import org.graphs.voltage.SquareVoltageGraph;
 import org.graphs.voltage.VoltageGraph;
+import org.graphs.voltage.TriangleVoltageGraph;
 import org.utils.logging.CommsSnapshot;
 import org.utils.logging.TickRecord;
 import org.motionModels.LatticeMotionModel;
