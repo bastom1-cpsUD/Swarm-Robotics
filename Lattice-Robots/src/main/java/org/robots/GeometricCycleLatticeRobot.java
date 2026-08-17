@@ -48,7 +48,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
      */
     public static final double TICK_RATE = 1.0;
     public static final double TIME_STEP = 0.5 * TICK_RATE;
-    public static final VoltageGraph GRAPH = TriangleVoltageGraph.build();
+    public static final VoltageGraph GRAPH = SnubSquareVoltageGraph.build();
     // ------------------------------------------------------------
     // Fields
     // ------------------------------------------------------------

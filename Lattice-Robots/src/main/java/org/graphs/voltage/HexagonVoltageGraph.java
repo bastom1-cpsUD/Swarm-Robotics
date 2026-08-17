@@ -9,9 +9,9 @@ import org.graphs.util.OrientedPoint;
  * endpoint of its own edges, so insertion order already matches true
  * rotation order -- no explicit setRotationOrder call is needed here, unlike
  * SquareVoltageGraph. The edges are inserted in clockwise (decreasing
- * departure angle: 60, 300, 180) order so every face traces clockwise,
- * matching the other lattice graphs. See DCEL-Implementation-Plan.md sec 5 /
- * primer sec 3, 7.
+ * departure angle: 60, 300, 180) order, matching the other lattice graphs;
+ * under Edmonds' sigma(twin(h)) a clockwise order traces faces
+ * counter-clockwise. See DCEL-Implementation-Plan.md sec 5 / primer sec 3, 7.
  */
 public final class HexagonVoltageGraph {
     private static final double EDGE_LENGTH = 50.0;

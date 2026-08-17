@@ -86,6 +86,12 @@ In words: *to continue around a face after traversing `h`, cross to the twin
 `twin(h)`, then take the next outgoing edge in rotation order at the vertex
 you just arrived at.*
 
+`VoltageGraphBuilder.resolveNextAndPrev` implements this formula literally — a
+forward step in whatever order the lattice declared. Note the concrete lattice
+graphs in `org.graphs.voltage` all declare their rotations **clockwise**, not
+CCW as assumed above; the rule is unchanged by that, but it means their faces
+come out traced counter-clockwise.
+
 This is the formal version of the ad hoc rule currently hard-coded in
 `CyclebuilderComms.inferNextEdge`:
 

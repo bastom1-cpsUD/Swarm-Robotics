@@ -41,7 +41,8 @@ public final class TriangleVoltageGraph {
 
         // Clockwise rotation order (decreasing departure angle: 0, 300, 240,
         // 180, 120, 60), matching the convention used across the other lattice
-        // graphs so every face traces clockwise.
+        // graphs. Under Edmonds' sigma(twin(h)) a clockwise order traces faces
+        // counter-clockwise.
         builder.setRotationOrder(role, e0, e300, e240, e180, e120, e60);
 
         return builder.build();
