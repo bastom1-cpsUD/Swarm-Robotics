@@ -3,11 +3,13 @@ package org.communicationModels.cycleBuildingComms.Messages;
 public class PromotionMessage extends AbstractMessage {
     private int assignedVertexID;
     private int assignedOutgoingEdgeID;
+    private boolean hasReachedStable;
 
-    public PromotionMessage(int senderId, int recipient, int assignedVertexID, int assignedOutgoingEdgeID) {
+    public PromotionMessage(int senderId, int recipient, int assignedVertexID, int assignedOutgoingEdgeID, boolean hasReachedStable) {
         super(senderId, recipient);
         this.assignedVertexID = assignedVertexID;
         this.assignedOutgoingEdgeID = assignedOutgoingEdgeID;
+        this.hasReachedStable = hasReachedStable;
     }
 
     /**{@inheritDoc}*/
@@ -27,6 +29,10 @@ public class PromotionMessage extends AbstractMessage {
         return assignedOutgoingEdgeID;
     }
 
+    public boolean hasReachedStable() {
+        return hasReachedStable;
+    }
+
     /**
      * Provides details of the message
      * @return a string with message details
@@ -34,7 +40,8 @@ public class PromotionMessage extends AbstractMessage {
     private String getMessageInfo() {
         return super.messageInfo() + "\n"
         + "Assigned Vertex ID: " + this.assignedVertexID + "\n"
-        + "Assigned Edge ID: " + this.assignedOutgoingEdgeID;
+        + "Assigned Edge ID: " + this.assignedOutgoingEdgeID + "\n"
+        + "Has Reached Stable: " + this.hasReachedStable;
     }
     
     @Override
@@ -56,7 +63,8 @@ public class PromotionMessage extends AbstractMessage {
         PromotionMessage other = (PromotionMessage) o;
 
         return this.assignedVertexID == other.getAssignedVertexID()
-                && this.assignedOutgoingEdgeID == other.getAssignedOutgoingEdgeID();
+                && this.assignedOutgoingEdgeID == other.getAssignedOutgoingEdgeID()
+                && this.hasReachedStable == other.hasReachedStable;
     }
 
     @Override
