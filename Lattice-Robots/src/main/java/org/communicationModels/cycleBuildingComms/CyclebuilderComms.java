@@ -65,6 +65,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     // claim has to be converted into this robot's frame.
     private HashMap<Integer, Observation> phaseTwoObservations;
     private boolean waitThisTimeStep;
+    private int edgeAttemptedPreviously;
 
     // Logging / instrumentation support (see CommsSnapshot, org.logging package)
     private ArrayList<OutgoingMessageRecord> sentThisTick;
@@ -332,7 +333,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                         return "Status Message from " + sm.getSenderId() + "(SUCCESS)";
                     } else {
                         setCycleStatusOf(sm.getOriginOutgoingEdgeID(), CycleStatus.failed);
-                        log("-> cycle on edge " + sm.getOriginOutgoingEdgeID() + " FAILED, ceasing operations");
+                        log("-> cycle on edge " + sm.getOriginOutgoingEdgeID() + " FAILED, moving on");
                         return "Status Message from " + sm.getSenderId() + "(FAILURE)";
                     }
                 } else if(next instanceof RejectAssignmentMessage rm) {
@@ -358,7 +359,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                     if(!checkAssignmentForCurrentPosition(pm)) {
                         forwardRejectionUpstream(pm, false);
                         log("-> assignment REJECTED by " + pm.getSenderId() + "(WILL BREAK FORMATION)");
-                        return "Positioning Message from " + pm.getSenderId() + "(REJECTED)";
+                        return "Positioning Message from " + pm.getSenderId() + " (REJECTED, WILL BREAK FORMATION)";
 
                         //If a root sent the message, check if the next edge's cycle is complete
                     } else if(pm.getChainList().getRootID() == pm.getSenderId()){
@@ -367,16 +368,16 @@ public class CyclebuilderComms extends CommunicationSystem {
                         if(completedCycles.get(nextEdge.getId()) == CycleStatus.complete) {
                             forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
                             log("-> root received message from another root, but next edge's cycle is complete, forwarding SUCCESS upstream");
-                            return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED)";
+                            return "Positioning Message from " + pm.getSenderId() + " (ACCEPTED, CYCLE COMPLETE, forwarding SUCCESS upstream)";
                         } else if(!hasFailed()) {
                             log("-> root received message from another root, but next edge's cycle is NOT complete, forwarding ATTEMPT LATER upstream");
                             forwardAttemptLaterUpstream(pm);
-                            return "Positioning Message from " + pm.getSenderId() + "(REJECTED)";
+                            return "Positioning Message from " + pm.getSenderId() + " (REJECTED, next edge's cycle is NOT complete, forwarding ATTEMPT LATER upstream)";
 
                         } else {
                             forwardFailureUpstream(pm);
                             log("-> root received message from another root, but next edge's cycle is NOT complete, forwarding FAILURE upstream (NOT RETRYABLE)");
-                            return "Positioning Message from " + pm.getSenderId() + "(REJECTED)";
+                            return "Positioning Message from " + pm.getSenderId() + " (REJECTED, next edge's cycle is NOT complete, forwarding FAILURE upstream)";
                         }
 
                     } else {
@@ -389,7 +390,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                         }
                         self.addEdge(new Edge(pm.getRecipient(), pm.getSenderId()));
                     forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
-                    return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED)";
+                    return "Positioning Message from " + pm.getSenderId() + " (ACCEPTED)";
                     }
                 } else if(next instanceof PromotionMessage pm) {
                     //Neighbor promoted to stable, try again for cycle building
@@ -480,8 +481,9 @@ public class CyclebuilderComms extends CommunicationSystem {
                     self.addEdge(pendingChildEdge);
                     pendingChildID = childToBuild.getRobotId(); // Wait for status
                 } else {
-                    log("Ran out of options for cycles... Ceasing operations...");
+                    log("Ran out of options for building cycle on edge " + targetEdgeID + ", failing edge and moving on");
                     setCycleStatusOf(targetEdgeID, CycleStatus.failed);
+                    resetToRoot();
                     return "Failed (No valid neighbors for cycle, ceasing operations)";
                 }
                 if(VERBOSE) {
