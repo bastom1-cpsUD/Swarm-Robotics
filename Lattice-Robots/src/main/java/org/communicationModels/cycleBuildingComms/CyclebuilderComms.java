@@ -100,19 +100,20 @@ public class CyclebuilderComms extends CommunicationSystem {
         ////////////////
      */
 
-    public void makeFirstPhaseObservations() {
+    public HashMap<Integer, Observation> makeFirstPhaseObservations() {
         //Observe neighbors and their positions
         ArrayList<GeometricCycleLatticeRobot> neighbors = self.getNeighbors();
         phaseOneObservations.clear();
         if(neighbors == null || neighbors.isEmpty()) {
             phaseOneObservations = new HashMap<>();
-            return;
+            return phaseOneObservations;
         }
 
         RigidBodyTransformation globalToLocal = new RigidBodyTransformation(self.getPosition()).inverse();
 
         //Check if pendingChild has left communication range; if cyclebuilder, check if someone occupies my spot
         boolean childHasLeft = true;
+        boolean assignmentOccupied = false;
         OrientedPoint myAssignment = getAssignedLocalPosition();
 
         for(GeometricCycleLatticeRobot neighbor : neighbors) {
@@ -126,12 +127,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                 // alone. neighborPosition now carries the neighbor's heading in this
                 // robot's frame, so occupancy can require a pose match.
                 if(MathUtils.isZero(myAssignment.distance(neighborPosition), MathUtils.EPSILON)) {
-                    forwardRejectionToParent(false);
-                    resetToUnassigned();
-                    hasBeenAssigned = false;
-                    self.clearEdges();
-                    log("-> Assignment already occupied. Forwarding rejection to parent.");
-                    return;
+                    assignmentOccupied = true;
                 }
             }
             // The neighbor's declared target, in its own frame -- see Observation's
@@ -147,7 +143,16 @@ public class CyclebuilderComms extends CommunicationSystem {
             pendingChildID = -1; // HAS MUTATED STATE
         }
 
+        if(assignmentOccupied && role == CycleRole.cycleBuilder) {
+            forwardRejectionToParent(false);
+            resetToUnassigned();
+            hasBeenAssigned = false;
+            self.clearEdges();
+            log("-> Assignment already occupied. Forwarding rejection to parent.");
+            return phaseOneObservations;
+        }
 
+        return phaseOneObservations;
     }
 
     @Override
@@ -540,17 +545,18 @@ public class CyclebuilderComms extends CommunicationSystem {
      * <p>Separate observations rather than reusing phase one's, because a tick of motion
      * happens in between and every relative pose has moved.
      */
-    public void makeSecondPhaseObservations() {
+    public HashMap<Integer, Observation> makeSecondPhaseObservations() {
         ArrayList<GeometricCycleLatticeRobot> neighbors = self.getNeighbors();
         phaseTwoObservations.clear();
         if(neighbors == null || neighbors.isEmpty()) {
-            return;
+            return new HashMap<>();
         }
 
         RigidBodyTransformation globalToLocal = new RigidBodyTransformation(self.getPosition()).inverse();
         for(GeometricCycleLatticeRobot neighbor : neighbors) {
             phaseTwoObservations.put(neighbor.getRobotId(), new Observation(neighbor, globalToLocal));
         }
+        return phaseTwoObservations;
     }
 
     /**
@@ -686,7 +692,7 @@ public class CyclebuilderComms extends CommunicationSystem {
      *
      * @return a description of the contention for the tick log, or null if there was none
      */
-    public String detectAssignmentContention() {
+    public String detectAssignmentContention(HashMap<Integer, Observation> phaseObservations) {
         OrientedPoint myClaim = getClaimedLocalTarget();
         if (myClaim == null) {
             return null;
@@ -696,7 +702,7 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         // The maximum possible distance a robot can move in one tick/phase; radius of the "contention zone" around a lattice spot. If two robots individual
         // claims fall within this distance, they can be consider equal if their claimed role IDS are the same.
-        double gamma = self.getMaxSpeed() * (0.5) * GeometricCycleLatticeRobot.TIME_STEP;
+        double gamma = self.getMaxSpeed() / GeometricCycleLatticeRobot.TICK_RATE;
 
         // Resolve against the strongest rival rather than the first one found: iteration
         // order over the claim map must not decide who keeps the assignment. "Strongest"
@@ -711,7 +717,7 @@ public class CyclebuilderComms extends CommunicationSystem {
             //   (T_self^-1 * T_sender) * (T_sender^-1 * T_target) = T_self^-1 * T_target
             // Both halves are local -- one communicated, one sensed -- so no shared
             // origin is assumed anywhere.
-            Observation obs = phaseTwoObservations.get(senderID);
+            Observation obs = phaseObservations.get(senderID);
             if (obs == null) {
                 continue;
             }
