@@ -180,6 +180,11 @@ public class CyclebuilderComms extends CommunicationSystem {
             incomingMessages.add(incomingMessages.poll());
             return "N/A (Waiting for pending child " + pendingChildID + ")";
         }
+        if(!validateSenderIsNeighbor(peek.getSenderId())) {
+            log("-> sender " + peek.getSenderId() + " is not a neighbor, discarding message");
+            incomingMessages.poll();
+            return "N/A (Discarded message from non-neighbor " + peek.getSenderId() + ")";
+        }
 
         AbstractMessage next = incomingMessages.poll();
         log("Received " + next.getMessageType() + " from robot " + next.getSenderId());
@@ -383,10 +388,15 @@ public class CyclebuilderComms extends CommunicationSystem {
                     }
                 } else if(next instanceof PromotionMessage pm) {
                     //Neighbor promoted to stable, try again for cycle building
-                    resetToRoot();
-                    reattemptFailedCycles();
-                    log("-> root received Promotion Message from " + pm.getSenderId() + ", clearing hasFailed and will attempt to reassign");
-                    return "Promotion Message from " + pm.getSenderId() + "(WILL ATTEMPT TO COMPLETE CYCLES)";
+                    if(pm.hasReachedStable()) {
+                        resetToRoot();
+                        reattemptFailedCycles();
+                        log("-> root received Promotion Message from " + pm.getSenderId() + ", neighbor has reached stable, will attempt to reassign");
+                         return "Promotion Message from " + pm.getSenderId() + "(REACTIVATED, WILL ATTEMPT TO COMPLETE CYCLES)";
+                    } else {
+                        log("-> root received Promotion Message from " + pm.getSenderId() + ", neighbor has NOT reached stable, will NOT attempt to reassign");
+                        return "Promotion Message from " + pm.getSenderId() + "(NOT REACTIVATED, WILL NOT ATTEMPT TO COMPLETE CYCLES)";
+                    }
                 } else {
                     log("-> root received unexpected message type: " + next.getMessageType());
                     return "N/A (Unhandled message type: " + next.getMessageType() + ")";
@@ -442,10 +452,15 @@ public class CyclebuilderComms extends CommunicationSystem {
                 int targetEdgeID = determineNextCycleToComplete();
                 
 
-                if (targetEdgeID == -1 && !hasFailed()) {
+                if (targetEdgeID == -1) {
                     promoteAdjacentVerticesToRoots();
-                    promoteSelfToStable();
-                    return "Done (All cycles completed, promoted to stable)";
+                    if(!hasFailed()) {
+                        promoteSelfToStable();
+                        log("-> all cycles completed, promoting self to stable");
+                        return "Done (All cycles completed, promoted to stable)";
+                    }
+                    
+                    return "Done (Not all cycles completed, but no valid neighbors for cycle, ceasing operations)";
                 }
 
                 HalfEdge targetEdge = retrieveEdgeFromGraph(targetEdgeID);
@@ -829,13 +844,26 @@ public class CyclebuilderComms extends CommunicationSystem {
         List<HalfEdge> edges = graph.getOutgoingHalfEdges(myRole);
 
         for(HalfEdge edge : edges) {
-            GeometricCycleLatticeRobot neighbor = findBestNeighborForEdge(edge);
-            PromotionMessage pm = new PromotionMessage(self.getRobotId(), neighbor.getRobotId(), getVertexIDof(edge), getEdgeIDof(edge));
-            send(neighbor, pm);
+            if(completedCycles.get(getEdgeIDof(edge)) == CycleStatus.complete) {
+                GeometricCycleLatticeRobot neighbor = findBestNeighborForEdge(edge);
+                PromotionMessage pm = new PromotionMessage(self.getRobotId(), neighbor.getRobotId(), getVertexIDof(edge), getEdgeIDof(edge), !hasFailed());
+                send(neighbor, pm);
+                log("-> promoting neighbor on edge " + getEdgeIDof(edge) + " to root");
+            }
+            
         }
     }
 
     //ASSIGNMENT-RELATED UTIL
+
+    private boolean validateSenderIsNeighbor(int senderID) {
+        for(Observation obs : phaseOneObservations.values()) {
+            if(obs.getId() == senderID) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     private GeometricCycleLatticeRobot getNeighborByID(int robotID) {
         for(GeometricCycleLatticeRobot neighbor : self.getNeighbors()) {

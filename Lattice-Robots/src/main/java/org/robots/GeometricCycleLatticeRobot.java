@@ -177,10 +177,10 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
                     action = commsSystem.sendMessage(true, tick);
                 }
                 default -> {
+                    commsSystem.makeFirstPhaseObservations();
+                    
                     // 1. Process incoming messages
                     processed = commsSystem.processMessages(tick);
-
-                    commsSystem.makeFirstPhaseObservations();
 
                     // 2. Ask comms system for current target, 3. broadcast
                     action = commsSystem.sendMessage(updateAssignedPosition(), tick);
