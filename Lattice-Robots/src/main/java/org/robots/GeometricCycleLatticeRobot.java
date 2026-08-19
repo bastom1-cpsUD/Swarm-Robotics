@@ -30,6 +30,7 @@ import org.utils.logging.TickRecord;
 import org.motionModels.LatticeMotionModel;
 import org.motionModels.TimeStepDiffDrive;
 import org.simulation.Edge;
+import org.utils.AvoidanceGeometry;
 import org.utils.MathUtils;
 
 /**
@@ -46,6 +47,40 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
      */
     public static final double TICK_RATE = 1.0;
     public static final VoltageGraph GRAPH = SnubSquareVoltageGraph.build();
+
+    /**
+     * Radius of this robot's physical bubble. Two robots are in collision when their
+     * centres are closer than {@link #KEEP_OUT}.
+     *
+     * <p><b>INVARIANT:</b> {@code 2 * BODY_RADIUS} must be strictly less than the shortest
+     * edge length of every lattice in {@code org.graphs.voltage} — currently 50.0
+     * (Hexagon, Triangle, OctagonSquare, SnubHexagon, ElongatedTriangular,
+     * HexagonTriangle, HexagonSquareTriangle and both Dodecagon variants; SnubSquare and
+     * Square are 70.0). Violating it makes two adjacent lattice spots permanently
+     * collide, so no formation could ever close.
+     *
+     * <p>This is a <em>clearance</em> radius, deliberately smaller than the triangle
+     * {@code TriangularModel} draws, whose nose vertex reaches
+     * {@code 1.2 * 30/sqrt(3) = 20.78}. Sizing the bubble to the drawn hull would put 19
+     * of the 100 robots in the shipped dataset in overlap before the first tick, against
+     * 1 at 15.0. The bubble overlay (B key) draws the true bubble, so the discrepancy
+     * stays visible rather than hidden. Retune alongside
+     * {@code TriangularModel.ROBOT_SIZE}.
+     */
+    public static final double BODY_RADIUS = 15.0;
+
+    /**
+     * Centre-to-centre separation below which two robots are in collision.
+     *
+     * <p>The hard guard in {@link #move(double)} enforces this with <em>zero</em> safety
+     * margin, which is correct only while {@code AsyncRobotPanel}'s motion task moves all
+     * robots sequentially on a single thread: each robot then tests against neighbour
+     * positions that are fully committed, so no pair can slip past each other's checks.
+     * If motion is ever parallelised across robots, each must instead be tested against a
+     * <em>snapshot</em> of neighbour poses taken before the frame, and this constant must
+     * grow by one frame's travel ({@code MAX_LINEAR_SPEED / RENDER_FPS}, about 0.33).
+     */
+    public static final double KEEP_OUT = 2.0 * BODY_RADIUS;
     // ------------------------------------------------------------
     // Fields
     // ------------------------------------------------------------
@@ -57,6 +92,15 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
 
     private OrientedPoint assignedPosition;
     private boolean isMovingToAssignedPosition = false;
+
+    /**
+     * Whether the last motion frame's step was refused by the hard guard. Written by the
+     * motion task, read by the render thread, hence volatile.
+     */
+    private volatile boolean lastStepVetoed = false;
+
+    /** What the avoidance layer is doing to this robot's motion; overlay/log only. */
+    private volatile AvoidanceState avoidanceState = AvoidanceState.CLEAR;
 
     // ------------------------------------------------------------
     // Constructor
@@ -228,11 +272,71 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // ------------------------------------------------------------
     // Motion
     // ------------------------------------------------------------
+    /**
+     * Advances this robot one motion frame toward its current waypoint, refusing any step
+     * that would drive a body into a neighbour.
+     *
+     * <p>This is the collision layer's <strong>guarantee</strong>, and it is deliberately
+     * the only place one lives. It runs at motion rate (30 fps) rather than tick rate
+     * (1 Hz) because a decision taken once per tick is open-loop for roughly thirty motion
+     * frames and therefore cannot guarantee anything. It classifies nothing, sends nothing
+     * and reads no protocol state — it is a proximity sensor plus a veto, and a real
+     * platform's bumper likewise runs faster than its radio.
+     *
+     * <p>The step is <em>speculated on a copy</em> rather than taken and rolled back.
+     * {@code TimeStepDiffDrive.moveTo} mutates the pose it is handed in place, and rebuilds
+     * its {@code moveState} and wheel velocities from scratch on every call, so a discarded
+     * candidate leaks nothing except an inflated {@code distTraveled} counter — telemetry
+     * only, read by no decision.
+     *
+     * <p>One bypass exists and is tolerated: {@link #updateAssignedPosition()}'s arrival
+     * branch writes {@code pose} directly, outside this method. That write is bounded by
+     * the arrival gate to {@link MathUtils#EPSILON}, four orders of magnitude below
+     * {@link #KEEP_OUT}, so it cannot produce a consequential overlap.
+     */
     @Override
     public void move(double dt) {
-        if (assignedPosition != null) {
-            latticeMotionModel.moveTo(pose, assignedPosition, dt);
+        OrientedPoint waypoint = assignedPosition;
+        if (waypoint == null) {
+            return;
         }
+
+        OrientedPoint candidate = new OrientedPoint(pose);
+        latticeMotionModel.moveTo(candidate, waypoint, dt);
+
+        if (!stepIsPermitted(candidate)) {
+            lastStepVetoed = true;
+            avoidanceState = AvoidanceState.BLOCKED;
+            return;
+        }
+
+        lastStepVetoed = false;
+        avoidanceState = AvoidanceState.CLEAR;
+        pose.x = candidate.x;
+        pose.y = candidate.y;
+        pose.orientation = candidate.orientation;
+    }
+
+    /**
+     * Whether a candidate pose may be committed, tested against every neighbour.
+     *
+     * <p>Iterates the {@code neighbors} field directly rather than through
+     * {@link #getNeighbors()}: this runs thirty times a second for every robot and the
+     * accessor allocates a defensive copy per call. Doing so is safe without added
+     * synchronization because the list is only ever restructured by
+     * {@code AsyncRobotPanel.runProximityCheck()} under the <b>write</b> lock, which
+     * excludes the motion task holding the read lock.
+     *
+     * @param candidate the pose the motion model produced for this frame
+     * @return true if no neighbour vetoes the step
+     */
+    private boolean stepIsPermitted(OrientedPoint candidate) {
+        for (GeometricCycleLatticeRobot other : neighbors) {
+            if (!AvoidanceGeometry.permitsStep(pose, candidate, other.getPosition(), KEEP_OUT)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ------------------------------------------------------------
@@ -260,6 +364,21 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
 
     public boolean isMovingToAssignedPosition() {
         return isMovingToAssignedPosition;
+    }
+
+    /** Whether the hard guard refused the most recent motion frame. Overlay/log only. */
+    public boolean wasStepVetoed() {
+        return lastStepVetoed;
+    }
+
+    /** What the avoidance layer is doing to this robot's motion. Overlay/log only. */
+    public AvoidanceState getAvoidanceState() {
+        return avoidanceState;
+    }
+
+    /** One tick of travel at full speed — the quantity {@code CyclebuilderComms} calls gamma. */
+    public static double tickTravel() {
+        return TimeStepDiffDrive.MAX_LINEAR_SPEED / TICK_RATE;
     }
 
     public double getMaxSpeed() {

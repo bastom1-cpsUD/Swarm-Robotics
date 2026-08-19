@@ -658,9 +658,13 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         boolean iAmParked = isParked(myClaim);
 
-        // The maximum possible distance a robot can move in one tick/phase; radius of the "contention zone" around a lattice spot. If two robots individual
+        // The maximum possible distance a robot can move in one tick; radius of the "contention zone" around a lattice spot. If two robots individual
         // claims fall within this distance, they can be consider equal if their claimed role IDS are the same.
-        double gamma = self.getMaxSpeed() / GeometricCycleLatticeRobot.TICK_RATE;
+        //
+        // Shared with the collision layer via tickTravel() rather than recomputed here:
+        // both layers reason about one tick of travel, and two independent expressions of
+        // the same quantity would eventually drift apart.
+        double gamma = GeometricCycleLatticeRobot.tickTravel();
 
         // Resolve against the strongest rival rather than the first one found: iteration
         // order over the claim map must not decide who keeps the assignment. "Strongest"
