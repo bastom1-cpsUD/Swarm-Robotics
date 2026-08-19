@@ -17,6 +17,7 @@ import java.awt.geom.Ellipse2D;
 import java.awt.geom.Path2D;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Renders a single robot's {@link TickRecord} into an {@link HtmlLog}: a
@@ -61,7 +62,8 @@ public record RobotFrameView(TickRecord rec, List<OrientedPoint> trajectory) imp
                 rec.before().pendingChildID(), rec.after().pendingChildID(),
                 rec.processedDescription(),
                 rec.actionDescription(),
-                rec.sent().isEmpty() ? "(none)" : rec.sent().toString()));
+                rec.sent().isEmpty() ? "(none)" : rec.sent().toString())
+                + cycleProgress());
 
         try (LogGraphics canvas = log.mappedGraphics("robot-" + rec.robotId() + "-", VIEW, IMG_SIZE, IMG_SIZE)) {
             Graphics2D g = canvas.graphics();
@@ -69,6 +71,54 @@ public record RobotFrameView(TickRecord rec, List<OrientedPoint> trajectory) imp
             drawNeighbors(g);
             drawSelf(g);
         }
+    }
+
+    /**
+     * The root-only progress lines appended to the summary block: how many of
+     * this robot's faces are still open, and where each one stands.
+     *
+     * <p>Empty for any robot with no cycle bookkeeping (see
+     * {@link CommsSnapshot#tracksCycles()}), so unassigned robots and
+     * cycleBuilders — for which the counts would be a meaningless
+     * {@code 0 of 0} — get no line at all. The "before" side reads {@code n/a}
+     * on the tick a robot is promoted to root, since its edge map did not exist
+     * yet when that snapshot was taken.</p>
+     */
+    private String cycleProgress() {
+        if (!rec.before().tracksCycles() && !rec.after().tracksCycles()) {
+            return "";
+        }
+
+        CommsSnapshot after = rec.after();
+        return """
+                cycles left:     %s -> %s
+                cycle statuses:  %s
+                """.formatted(
+                describeRemaining(rec.before()),
+                describeRemaining(after),
+                describeStatuses(after));
+    }
+
+    private static String describeRemaining(CommsSnapshot snapshot) {
+        if (!snapshot.tracksCycles()) {
+            return "n/a";
+        }
+        return "%d of %d".formatted(snapshot.remainingCycles(), snapshot.totalCycles());
+    }
+
+    /**
+     * Per-edge breakdown of the remainder, sorted by half-edge id so the same
+     * root reads the same way from one tick to the next — {@code completedCycles}
+     * is a copy of a {@code HashMap}, whose iteration order carries no meaning.
+     */
+    private static String describeStatuses(CommsSnapshot snapshot) {
+        if (!snapshot.tracksCycles()) {
+            return "(none)";
+        }
+        return snapshot.completedCycles().entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> "edge " + entry.getKey() + "=" + entry.getValue())
+                .collect(Collectors.joining(", "));
     }
 
     private void drawTrajectory(Graphics2D g) {
