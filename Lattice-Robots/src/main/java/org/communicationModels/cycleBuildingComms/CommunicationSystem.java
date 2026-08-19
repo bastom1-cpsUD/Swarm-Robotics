@@ -43,7 +43,7 @@ public abstract class CommunicationSystem {
     protected final Map<Integer, ClaimEntry> incomingClaims = new ConcurrentHashMap<>();
 
     /**
-     * A received claim and how many of the receiver's own phases have elapsed since it
+     * A received claim and how many of the receiver's ticks have elapsed since it
      * arrived.
      *
      * <p>An age rather than a timestamp, deliberately: no clock is involved on either

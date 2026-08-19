@@ -33,10 +33,8 @@ public class CyclebuilderComms extends CommunicationSystem {
     private TrustLevel trust;
 
     private static final boolean VERBOSE = true;
-    // Two phases is one full time step: a claim survives the phase it arrived in and the
-    // next, then goes. Long enough to tolerate one dropped beacon and to stay immune to
-    // the order robots happen to activate in; short enough that a robot which went
-    // unassigned and stopped emitting cannot keep provoking a phantom conflict.
+    // A claim survives the tick it arrived in and the
+    // next, then goes.
     private static final int CLAIM_TTL_PHASES = 2;
 
     private HashMap<Integer, CycleStatus> completedCycles;
@@ -59,11 +57,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     private GeometricCycleLatticeRobot self;
 
     // Time-Step Data
-    private HashMap<Integer, Observation> phaseOneObservations;
-    // Re-observed in phase two rather than reusing phase one's: a tick of motion happens
-    // between the two, so phase one's relative poses are stale by the time an incoming
-    // claim has to be converted into this robot's frame.
-    private HashMap<Integer, Observation> phaseTwoObservations;
+    private HashMap<Integer, Observation> observations;
     private boolean waitThisTimeStep;
 
     // Logging / instrumentation support (see CommsSnapshot, org.logging package)
@@ -82,8 +76,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.role = CycleRole.unassigned;
         this.completedCycles = new HashMap<>();
         this.self = self;
-        this.phaseOneObservations = new HashMap<>();
-        this.phaseTwoObservations = new HashMap<>();
+        this.observations = new HashMap<>();
         this.incomingMessages = new ConcurrentLinkedQueue<>();
         this.unableToDoAssignmentIDs = new ArrayList<>();
         this.sentThisTick = new ArrayList<>();
@@ -94,19 +87,13 @@ public class CyclebuilderComms extends CommunicationSystem {
         originOutgoingEdgeID = -1;
     }
 
-    /*
-        ////////////////
-        PHASE ONE LOGIC
-        ////////////////
-     */
-
-    public HashMap<Integer, Observation> makeFirstPhaseObservations() {
+    public HashMap<Integer, Observation> makeObservations() {
         //Observe neighbors and their positions
         ArrayList<GeometricCycleLatticeRobot> neighbors = self.getNeighbors();
-        phaseOneObservations.clear();
+        observations.clear();
         if(neighbors == null || neighbors.isEmpty()) {
-            phaseOneObservations = new HashMap<>();
-            return phaseOneObservations;
+            observations = new HashMap<>();
+            return observations;
         }
 
         RigidBodyTransformation globalToLocal = new RigidBodyTransformation(self.getPosition()).inverse();
@@ -133,7 +120,7 @@ public class CyclebuilderComms extends CommunicationSystem {
             // The neighbor's declared target, in its own frame -- see Observation's
             // three-argument constructor. Null for anything without a live assignment.
             Observation obs = new Observation(neighbor, globalToLocal);
-            phaseOneObservations.put(neighbor.getRobotId(), obs);
+            observations.put(neighbor.getRobotId(), obs);
         }
 
         if(childHasLeft && pendingChildID != -1) {
@@ -149,10 +136,10 @@ public class CyclebuilderComms extends CommunicationSystem {
             hasBeenAssigned = false;
             self.clearEdges();
             log("-> Assignment already occupied. Forwarding rejection to parent.");
-            return phaseOneObservations;
+            return observations;
         }
 
-        return phaseOneObservations;
+        return observations;
     }
 
     @Override
@@ -533,33 +520,6 @@ public class CyclebuilderComms extends CommunicationSystem {
         ASSIGNMENT CONTENTION
         ////////////////////////
      */
-
-    /**
-     * Re-observes neighbours for phase two.
-     *
-     * <p>Uses the same frame convention as {@link #makeFirstPhaseObservations()} --
-     * this robot's <em>actual</em> pose. That matters: an incoming claim is converted
-     * into this robot's frame by composing it with the observation of its sender, so the
-     * observation and this robot's own assigned local pose must live in one frame or the
-     * comparison is meaningless.
-     *
-     * <p>Separate observations rather than reusing phase one's, because a tick of motion
-     * happens in between and every relative pose has moved.
-     */
-    public HashMap<Integer, Observation> makeSecondPhaseObservations() {
-        ArrayList<GeometricCycleLatticeRobot> neighbors = self.getNeighbors();
-        phaseTwoObservations.clear();
-        if(neighbors == null || neighbors.isEmpty()) {
-            return new HashMap<>();
-        }
-
-        RigidBodyTransformation globalToLocal = new RigidBodyTransformation(self.getPosition()).inverse();
-        for(GeometricCycleLatticeRobot neighbor : neighbors) {
-            phaseTwoObservations.put(neighbor.getRobotId(), new Observation(neighbor, globalToLocal));
-        }
-        return phaseTwoObservations;
-    }
-
     /**
      * This robot's assigned pose expressed in its own frame -- the form it can declare
      * to neighbors without either side needing a shared origin. Null whenever there is
@@ -599,8 +559,8 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     /**
-     * Ages every claim heard from a neighbour by one phase and drops any that have
-     * expired. The host calls this once at the start of each phase.
+     * Ages every claim heard from a neighbour by one tick and drops any that have
+     * expired. The host calls this once at the start of each tick.
      */
     public void expireStaleClaims() {
         ageClaims(CLAIM_TTL_PHASES);
@@ -608,10 +568,7 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     /**
      * Broadcasts this robot's target to every neighbour in range, if it has one to
-     * declare. Called once per tick regardless of phase: robots activate staggered and
-     * asynchronously, so one robot's phase two routinely lands during a neighbour's phase
-     * one, and emitting only in phase two would silently drop claims to that drift.
-     *
+     * declare.
      * @return a description of what was emitted, or null if there was nothing to declare
      */
     public String broadcastTargetClaim() {
@@ -631,7 +588,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     /** True if (aParked, aID) outranks (bParked, bID): possession first, then lower id. */
-    private boolean outranks(boolean aParked, int aID, boolean bParked, int bID) {
+    protected boolean outranks(boolean aParked, int aID, boolean bParked, int bID) {
         if (aParked != bParked) return aParked;
         return aID < bID;
     }
@@ -678,8 +635,8 @@ public class CyclebuilderComms extends CommunicationSystem {
      * <em>before</em> it is transformed into this frame, via {@link #isParked}, for the
      * reason given there.
      *
-     * <p>Symmetry is a property of the steady state, not of any single phase. In the first
-     * phase two after an assignment lands, whichever robot activates earlier may not have
+     * <p>Symmetry is a property of the steady state, not of any single tick. In the first
+     * tick after an assignment lands, whichever robot activates earlier may not have
      * heard its rival yet and will keep the spot; the rival yields on its own turn, or one
      * time step later if neither had emitted in time. Contention therefore resolves within
      * two time steps rather than one. Closing that window entirely would need a global
@@ -864,7 +821,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     //ASSIGNMENT-RELATED UTIL
 
     private boolean validateSenderIsNeighbor(int senderID) {
-        for(Observation obs : phaseOneObservations.values()) {
+        for(Observation obs : observations.values()) {
             if(obs.getId() == senderID) {
                 return true;
             }
@@ -901,7 +858,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         int rootID = chainMemberList.isEmpty() ? -1 : chainMemberList.getRootID();
 
         // Root is only a candidate if it's not banned/parent, and check it separately from the rest
-        Observation rootObs = phaseOneObservations.get(rootID);
+        Observation rootObs = observations.get(rootID);
         if (rootObs != null && !unableToDoAssignmentIDs.contains(rootID)) {
             //EDIT FOR PROPER ANGLE PRESERVATION (NEW ANGLE PRESERVATION EXISTS)
             // Cycle closure on position alone. Both operands now carry meaningful
@@ -918,7 +875,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         ArrayList<Observation> validObservations = new ArrayList<>();
         ArrayList<Observation> priorityObservations = new ArrayList<>();
 
-        for (Observation obs : phaseOneObservations.values()) {
+        for (Observation obs : observations.values()) {
             int robotID = obs.getId();
             if (robotID != rootID && !chainMemberList.isInList(robotID) && !unableToDoAssignmentIDs.contains(robotID)) {
                 // A neighbor already sitting exactly at the target position must win outright,
@@ -1208,8 +1165,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     public void resetObservations() {
-        this.phaseOneObservations.clear();
-        this.phaseTwoObservations.clear();
+        this.observations.clear();
     }
 
     /**
@@ -1315,7 +1271,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                 getOriginEdge(),
                 Map.copyOf(completedCycles),
                 snapshotQueueInOrder(),
-                Map.copyOf(phaseOneObservations),
+                Map.copyOf(observations),
                 List.copyOf(unableToDoAssignmentIDs)
         );
     }

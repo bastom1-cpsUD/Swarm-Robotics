@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
  * world coordinates:</p>
  * <ul>
  *   <li>The robot itself sits at the origin, facing +y — no transform needed,
- *       since that's already the frame {@code makeFirstPhaseObservations()} computes.</li>
+ *       since that's already the frame {@code makeObservations()} computes.</li>
  *   <li>Neighbor dots are plotted directly from {@code Observation.getLocalPosition()}
  *       captured in the pre-tick snapshot — exactly the data the algorithm
  *       itself used to make its decision this tick. Only the position is drawn;

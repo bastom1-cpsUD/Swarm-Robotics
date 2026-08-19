@@ -42,12 +42,9 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // ------------------------------------------------------------
     public static final double COMM_RANGE = 75.0;
     /**
-     * Robot activations per second. One activation is one <em>tick</em>: a single phase
-     * plus the motion that follows it. A full time step is two ticks -- phase one
-     * (message passing) then phase two (assignment reconciliation).
+     * Robot activations per second. One activation is one <em>tick</em>.
      */
     public static final double TICK_RATE = 1.0;
-    public static final double TIME_STEP = 0.5 * TICK_RATE;
     public static final VoltageGraph GRAPH = SnubSquareVoltageGraph.build();
     // ------------------------------------------------------------
     // Fields
@@ -60,13 +57,6 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
 
     private OrientedPoint assignedPosition;
     private boolean isMovingToAssignedPosition = false;
-
-    /**
-     * Which half of the time step the next activation runs. A time step is two ticks:
-     * phase one passes protocol messages and hands out assignments, phase two reconciles
-     * them against what neighbours have declared they are heading for.
-     */
-    private boolean inPhaseOne = true;
 
     // ------------------------------------------------------------
     // Constructor
@@ -132,16 +122,9 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // Main time-step
     // ------------------------------------------------------------
     /**
-     * Executes one activation — one <em>tick</em>, which is one phase plus the motion
-     * that follows it — and returns a full record of what happened: state immediately
+     * Executes one activation — one <em>tick</em>, and returns a full record of what happened: state immediately
      * before, what message was processed, what action resulted, what was sent, and state
      * immediately after.
-     *
-     * <p>Two ticks make a time step. <b>Phase one</b> is the protocol: process a message,
-     * observe, hand out an assignment. <b>Phase two</b> reconciles those assignments — it
-     * re-observes and checks whether any neighbour has declared it is heading for the
-     * same spot this robot is. Splitting them keeps assignment and reconciliation from
-     * racing inside a single activation.
      *
      * <p>The role dispatch below intentionally stays here rather than in the simulation
      * panel, since root/stable and cycleBuilder/unassigned activate their comms calls in
@@ -164,52 +147,37 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
         String processed;
         String action;
 
-     
-            switch(getRole()) {
-                case CycleRole.root -> {
-                    commsSystem.makeFirstPhaseObservations();
-                    processed = commsSystem.processMessages(tick);
-                    action = commsSystem.sendMessage(true, tick);
-                }
-                case CycleRole.stable -> {
-                    commsSystem.makeFirstPhaseObservations();
-                    processed = commsSystem.processMessages(tick);
-                    action = commsSystem.sendMessage(true, tick);
-                }
-                default -> {
-                    String contention = commsSystem.detectAssignmentContention(commsSystem.makeFirstPhaseObservations());
-                    
-                    // 1. Process incoming messages
-                    processed = commsSystem.processMessages(tick);
-
-                    // 2. Ask comms system for current target, 3. broadcast
-                    action = commsSystem.sendMessage(updateAssignedPosition(), tick);
-
-                    action = contention != null ? contention : action;
-
-                   
-                }
+        switch(getRole()) {
+            case CycleRole.root, CycleRole.stable -> {
+                commsSystem.makeObservations();
+                processed = commsSystem.processMessages(tick);
+                action = commsSystem.sendMessage(true, tick);
             }
-            // Emitted every activation rather than only in phase two. Robots activate
-            // staggered and asynchronously, so one robot's phase two routinely lands during a
-            // neighbour's phase one; gating emission on phase would silently drop claims to
-            // that drift.
-            commsSystem.broadcastTargetClaim();
+            default -> {
+                String contention = commsSystem.detectAssignmentContention(commsSystem.makeObservations());
+                
+                // 1. Process incoming messages
+                processed = commsSystem.processMessages(tick);
 
-             CommsSnapshot after = commsSystem.snapshot();
-                    OrientedPoint poseAfter = new OrientedPoint(pose);
+                // 2. Ask comms system for current target, 3. broadcast
+                action = commsSystem.sendMessage(updateAssignedPosition(), tick);
 
-                    return new TickRecord(tick, robotId, before, poseBefore, processed, action,
-                    commsSystem.sentThisTick(), after, poseAfter);
+                action = contention != null ? contention + " | " + action: action;                   
+            }
+        }
+        //Broadcast claim after processing messages for contention processing
+        commsSystem.broadcastTargetClaim();
+
+        CommsSnapshot after = commsSystem.snapshot();
+        OrientedPoint poseAfter = new OrientedPoint(pose);
+
+        return new TickRecord(tick, robotId, before, poseBefore, processed, action,
+        commsSystem.sentThisTick(), after, poseAfter);
     }
 
     /**
      * Points this robot at whatever its comms system currently considers its target, and
      * reports whether it is already there.
-     *
-     * <p>Called from both phases: phase one because a message may have just changed the
-     * assignment, phase two because contention resolution may have just removed it.
-     *
      * @return true if this robot is already at its assigned pose and heading
      */
     private boolean updateAssignedPosition() {
