@@ -65,7 +65,6 @@ public class CyclebuilderComms extends CommunicationSystem {
     // claim has to be converted into this robot's frame.
     private HashMap<Integer, Observation> phaseTwoObservations;
     private boolean waitThisTimeStep;
-    private int edgeAttemptedPreviously;
 
     // Logging / instrumentation support (see CommsSnapshot, org.logging package)
     private ArrayList<OutgoingMessageRecord> sentThisTick;
