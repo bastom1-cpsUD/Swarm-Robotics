@@ -164,7 +164,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
         String processed;
         String action;
 
-        if (inPhaseOne) {
+     
             switch(getRole()) {
                 case CycleRole.root -> {
                     commsSystem.makeFirstPhaseObservations();
@@ -177,49 +177,30 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
                     action = commsSystem.sendMessage(true, tick);
                 }
                 default -> {
-                    commsSystem.detectAssignmentContention(commsSystem.makeFirstPhaseObservations());
+                    String contention = commsSystem.detectAssignmentContention(commsSystem.makeFirstPhaseObservations());
                     
                     // 1. Process incoming messages
                     processed = commsSystem.processMessages(tick);
 
                     // 2. Ask comms system for current target, 3. broadcast
                     action = commsSystem.sendMessage(updateAssignedPosition(), tick);
+
+                    action = contention != null ? contention : action;
+
+                   
                 }
             }
-
-            // Emitted every activation rather than only in phase two. Robots activate
-            // staggered and asynchronously, so one robot's phase two routinely lands during a
-            // neighbour's phase one; gating emission on phase would silently drop claims to
-            // that drift.
-            commsSystem.broadcastTargetClaim();
-        } else {
-            // PHASE TWO — reconcile. No assignments are handed out here; the only message
-            // this can emit is a rejection to a parent when this robot yields a contested
-            // spot, which is ordinary protocol traffic.
-            processed = "N/A (phase two)";
-            
-            String contention = commsSystem.detectAssignmentContention(commsSystem.makeSecondPhaseObservations());
-
-            // After contention, not before: a yield clears the assignment, and this is
-            // what stops the robot from continuing toward a spot it just gave up.
-            updateAssignedPosition();
-
             // Emitted every activation rather than only in phase two. Robots activate
             // staggered and asynchronously, so one robot's phase two routinely lands during a
             // neighbour's phase one; gating emission on phase would silently drop claims to
             // that drift.
             commsSystem.broadcastTargetClaim();
 
-            action = contention != null ? contention : "N/A (no contention)";
-        }
+             CommsSnapshot after = commsSystem.snapshot();
+                    OrientedPoint poseAfter = new OrientedPoint(pose);
 
-        inPhaseOne = !inPhaseOne;
-
-        CommsSnapshot after = commsSystem.snapshot();
-        OrientedPoint poseAfter = new OrientedPoint(pose);
-
-        return new TickRecord(tick, robotId, before, poseBefore, processed, action,
-                commsSystem.sentThisTick(), after, poseAfter);
+                    return new TickRecord(tick, robotId, before, poseBefore, processed, action,
+                    commsSystem.sentThisTick(), after, poseAfter);
     }
 
     /**
