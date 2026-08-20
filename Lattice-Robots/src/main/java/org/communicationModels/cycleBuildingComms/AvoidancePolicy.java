@@ -34,29 +34,7 @@ import org.utils.MathUtils;
  */
 public final class AvoidancePolicy {
 
-    /**
-     * Displacement, in world units, below which a neighbour counts as not having moved
-     * this tick. Five percent of one tick's full-speed travel: five hundred times the
-     * {@code EPSILON}-bounded arrival snap, and far below any genuine motion.
-     */
-    private static final double STATIONARY_DISPLACEMENT = 0.5;
-
-    /**
-     * Consecutive quiet ticks required before a neighbour is believed to be stationary.
-     * More than one because a robot in {@code ROTATE_TO_POINT} translates nothing, and a
-     * single sample cannot tell that apart from parked.
-     */
-    private static final int STATIONARY_CONFIRM_TICKS = 2;
-
-    /**
-     * How long a chosen detour side is held before being re-evaluated from scratch.
-     *
-     * <p>The latch is load-bearing rather than an optimisation. The two candidate sides
-     * score almost identically precisely when the obstacle sits on the straight line to
-     * the target — which is the case detours exist for — so without hysteresis the choice
-     * flips every tick and the robot oscillates in place instead of going around.
-     */
-    private static final int DETOUR_LATCH_TTL_TICKS = 20;
+    private final GeometricCycleLatticeRobot self;
 
     /**
      * Slack subtracted from {@code COMM_RANGE} to get the tether radius. Small
@@ -68,23 +46,10 @@ public final class AvoidancePolicy {
      * lattice edge from its parent — 70 on SnubSquare — so a tether radius below that
      * would make the robot's own destination unreachable.
      */
-    private static final double TETHER_SAFETY = 1.0;
+    private static double TETHER_SAFETY = 1.0;
 
-    /**
-     * How long a robot stays committed to stepping aside, refreshed by every fresh
-     * request. Deliberately longer than the beacon TTL that carries the request: a
-     * commitment only two ticks long would have the evader start, stop, and achieve
-     * nothing.
-     */
-    private static final int EVASION_TTL_TICKS = 6;
-
-    /**
-     * Minimum ticks between re-aiming an evasion already under way. Without this, two
-     * builders taking turns ping-pong a single evader between two sidesteps forever and it
-     * never actually leaves either corridor.
-     */
-    private static final int EVASION_REAIM_MIN_TICKS = 2;
-
+    /** How far off a corridor's centre line counts as out of the way. Pure geometry: does not scale with tick rate. */
+    private static double CLEARANCE = GeometricCycleLatticeRobot.KEEP_OUT + 0.5 * GeometricCycleLatticeRobot.BODY_RADIUS;
     /**
      * How close to a corridor's centre line counts as being <em>on</em> it, with no side
      * of its own to escape toward.
@@ -95,8 +60,6 @@ public final class AvoidancePolicy {
      * by rounding error, and could flip between ticks.
      */
     private static final double ON_CORRIDOR_TOLERANCE = 1.0;
-
-    private final GeometricCycleLatticeRobot self;
 
     // --- stationarity classifier -------------------------------------------------
     /** Last tick's observations, in the frame this robot occupied at that time. */
@@ -180,7 +143,7 @@ public final class AvoidancePolicy {
                     continue;
                 }
                 OrientedPoint nowInPrevFrame = nowIntoPrevFrame.apply(obs.getLocalPosition());
-                if (before.distance(nowInPrevFrame) < STATIONARY_DISPLACEMENT) {
+                if (before.distance(nowInPrevFrame) < stationaryDisplacement()) {
                     quietTicks.merge(id, 1, Integer::sum);
                 } else {
                     quietTicks.put(id, 0);
@@ -202,7 +165,7 @@ public final class AvoidancePolicy {
     /** Whether a neighbour has been seen not to move for long enough to be believed. */
     public boolean isStationary(int robotId) {
         Integer quiet = quietTicks.get(robotId);
-        return quiet != null && quiet >= STATIONARY_CONFIRM_TICKS;
+        return quiet != null && quiet >= stationaryConfirmTicks();
     }
 
     // ---------------------------------------------------------------------------
@@ -344,7 +307,7 @@ public final class AvoidancePolicy {
 
         // Reuse the latched side while it is the same obstacle and still feasible.
         if (detourObstacleId == obstacleId && detourSign != 0
-                && detourAgeTicks < DETOUR_LATCH_TTL_TICKS) {
+                && detourAgeTicks < detourLatchTtlTicks()) {
             OrientedPoint latched =
                     AvoidanceGeometry.tangentWaypoint(here, obstacle, keepOut, reach, detourSign);
             if (AvoidanceGeometry.withinTether(latched, parent, tether)) {
@@ -428,10 +391,10 @@ public final class AvoidancePolicy {
             return;
         }
 
-        evasionTicksRemaining = EVASION_TTL_TICKS;
+        evasionTicksRemaining = evasionTtlTicks();
 
         if (evasionTarget != null) {
-            if (evasionAgeTicks < EVASION_REAIM_MIN_TICKS) {
+            if (evasionAgeTicks < evasionReaimMinTicks()) {
                 return;
             }
             // Already stepping aside somewhere that is clear of this new corridor too --
@@ -556,4 +519,21 @@ public final class AvoidancePolicy {
     public int blockingObstacleId() {
         return blockingObstacleId;
     }
+
+    private static double stationaryDisplacement() {
+    return Math.max(0.05 * GeometricCycleLatticeRobot.tickTravel(), 50 * MathUtils.EPSILON);
+}
+    private static int stationaryConfirmTicks() {
+        return Math.max(2, GeometricCycleLatticeRobot.ticksFor(2.0));
+    }
+    private static int detourLatchTtlTicks() {
+        return GeometricCycleLatticeRobot.ticksToTravel(2.0 * Math.PI * GeometricCycleLatticeRobot.KEEP_OUT);
+    }
+    private static int evasionTtlTicks() {
+        return GeometricCycleLatticeRobot.ticksToTravel(CLEARANCE) + GeometricCycleLatticeRobot.ticksFor(2.0);
+    }
+    private static int evasionReaimMinTicks() {
+        return Math.max(2, GeometricCycleLatticeRobot.ticksToTravel(GeometricCycleLatticeRobot.BODY_RADIUS));
+    }
+
 }

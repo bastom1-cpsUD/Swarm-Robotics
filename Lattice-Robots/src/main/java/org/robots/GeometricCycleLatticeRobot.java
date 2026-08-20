@@ -45,8 +45,9 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     /**
      * Robot activations per second. One activation is one <em>tick</em>.
      */
-    public static final double TICK_RATE = 1.0;
+    public static final double DEFAULT_TICK_RATE = 1.0;
     public static final VoltageGraph GRAPH = SnubSquareVoltageGraph.build();
+    private static volatile double currentTickRate = DEFAULT_TICK_RATE;
 
     /**
      * Radius of this robot's physical bubble. Two robots are in collision when their
@@ -442,11 +443,32 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
 
     /** One tick of travel at full speed — the quantity {@code CyclebuilderComms} calls gamma. */
     public static double tickTravel() {
-        return TimeStepDiffDrive.MAX_LINEAR_SPEED / TICK_RATE;
+        return TimeStepDiffDrive.MAX_LINEAR_SPEED / tickRate();
+    }
+
+    /** Ticks needed to cover {@code distance} at full speed, at the current rate. */
+    public static int ticksToTravel(double distance) {
+        return Math.max(1, (int) Math.ceil(distance / tickTravel()));
+    }
+
+    /** Ticks spanning {@code seconds} of wall clock, at the current rate. */
+    public static int ticksFor(double seconds) {
+        return Math.max(1, (int) Math.ceil(seconds * tickRate()));
     }
 
     public double getMaxSpeed() {
         return latticeMotionModel.getMaxSpeed();
+    }
+
+    public static double tickRate() {
+        return currentTickRate;
+    }
+
+    public static void setTickRate(double rate) {
+        if (rate <= 0.0) {
+            throw new IllegalArgumentException("Tick rate must be positive");
+        }
+        currentTickRate = rate;
     }
 
     // ------------------------------------------------------------

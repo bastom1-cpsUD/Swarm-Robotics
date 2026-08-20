@@ -50,8 +50,8 @@ public class AsyncRobotPanel extends JPanel {
     // ------------------------------------------------------------------
     private static final int  RENDER_FPS         = 30;
     private static final long RENDER_PERIOD_MS    = 1000L / RENDER_FPS;
-    private static final long DEFAULT_PERIOD_MS   = GeometricCycleLatticeRobot.TICK_RATE > 0.0
-            ? (long) (1000.0 / GeometricCycleLatticeRobot.TICK_RATE) : 1000L;
+    private static final long DEFAULT_PERIOD_MS   = GeometricCycleLatticeRobot.DEFAULT_TICK_RATE > 0.0
+            ? (long) (1000.0 / GeometricCycleLatticeRobot.DEFAULT_TICK_RATE) : 1000L;
     private static final long PROXIMITY_PERIOD_MS = 100L;
 
     // ------------------------------------------------------------------
@@ -106,10 +106,12 @@ public class AsyncRobotPanel extends JPanel {
 
     // ------------------------------------------------------------------
     // Telemetry — written by executor threads, read approx by EDT
-    // Plain map is fine: stale reads of longs are acceptable for display
+    // ConcurrentHashMap because the increment below runs outside the read lock, on
+    // several executor threads at once. Stale reads remain fine for display, but the
+    // writes are real concurrent mutation, and merge() keeps them from being lost.
     // ------------------------------------------------------------------
-    private final Map<Integer, Long> tickCounts      = new LinkedHashMap<>();
-    private final Map<Integer, Long> lastActivatedMs = new LinkedHashMap<>();
+    private final Map<Integer, Long> tickCounts      = new ConcurrentHashMap<>();
+    private final Map<Integer, Long> lastActivatedMs = new ConcurrentHashMap<>();
 
     // ------------------------------------------------------------------
     // Interaction state (EDT-only)
@@ -260,6 +262,8 @@ public class AsyncRobotPanel extends JPanel {
         slider.addChangeListener(e -> {
             periodMs = slider.getValue();
             speedLabel.setText(periodMs + " ms");
+            if (slider.getValueIsAdjusting()) return;          // still dragging
+            GeometricCycleLatticeRobot.setTickRate(1000.0 / periodMs);
             if (simRunning) rescheduleRobotTasks();
         });
         strip.add(slider);
@@ -408,7 +412,7 @@ public class AsyncRobotPanel extends JPanel {
         int n = ids.size();
         for (int i = 0; i < n; i++) {
             int  id           = ids.get(i);
-            long initialDelay = (long)((double) i / n * periodMs);
+            long initialDelay = periodMs + (long)((double) i / n * periodMs);
             ScheduledFuture<?> future = executor.scheduleAtFixedRate(
                     () -> tickRobot(id),
                     initialDelay, periodMs, TimeUnit.MILLISECONDS);
@@ -469,7 +473,7 @@ public class AsyncRobotPanel extends JPanel {
         if(rec != null) simLogger.record(rec);
 
         // Telemetry updated outside the lock — EDT reads are display-only
-        tickCounts.put(id, tickCounts.getOrDefault(id, 0L) + 1);
+        tickCounts.merge(id, 1L, Long::sum);
         lastActivatedMs.put(id, System.currentTimeMillis());
     }
 
@@ -487,7 +491,7 @@ public class AsyncRobotPanel extends JPanel {
                 TickRecord rec = e.getValue().executeTimeStep(dt, tick);
                 e.getValue().move(dt);
                 simLogger.record(rec);
-                tickCounts.put(e.getKey(), tickCounts.getOrDefault(e.getKey(), 0L) + 1);
+                tickCounts.merge(e.getKey(), 1L, Long::sum);
                 lastActivatedMs.put(e.getKey(), System.currentTimeMillis());
             }
         } catch(Exception e) {
