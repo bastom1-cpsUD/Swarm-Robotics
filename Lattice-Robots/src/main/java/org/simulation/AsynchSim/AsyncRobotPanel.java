@@ -568,7 +568,7 @@ public class AsyncRobotPanel extends JPanel {
             double nearest = nearestNeighborDistance(a);
 
             Color fill, edge;
-            if (nearest < keepOut) {
+            if (nearest <= keepOut) {
                 fill = BUBBLE_OVER_FILL;  edge = BUBBLE_OVER_EDGE;
             } else if (nearest < warn) {
                 fill = BUBBLE_NEAR_FILL;  edge = BUBBLE_NEAR_EDGE;
@@ -616,7 +616,7 @@ public class AsyncRobotPanel extends JPanel {
         for (int i = 0; i < all.size(); i++) {
             for (int j = i + 1; j < all.size(); j++) {
                 if (all.get(i).getPosition().distance(all.get(j).getPosition())
-                        < GeometricCycleLatticeRobot.KEEP_OUT) {
+                        <= GeometricCycleLatticeRobot.KEEP_OUT) {
                     overlaps++;
                 }
             }
@@ -764,7 +764,7 @@ public class AsyncRobotPanel extends JPanel {
         ry = bubbleLegendRow(g2, x, ry, rowH, BUBBLE_NEAR_FILL, BUBBLE_NEAR_EDGE, false,
                 String.format("one tick away (%.0f-%.0f)", keepOut, warn));
         ry = bubbleLegendRow(g2, x, ry, rowH, BUBBLE_OVER_FILL, BUBBLE_OVER_EDGE, false,
-                String.format("OVERLAP (<%.0f)", keepOut));
+                String.format("OVERLAP (≤%.0f)", keepOut));
         ry = bubbleLegendRow(g2, x, ry, rowH, null, KEEP_OUT_RING, true,
                 "keep-out, selected");
 

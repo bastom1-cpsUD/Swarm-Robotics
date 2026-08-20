@@ -22,6 +22,7 @@ import org.graphs.util.RigidBodyTransformation;
 import org.graphs.voltage.HalfEdge;
 import org.graphs.voltage.Role;
 import org.graphs.voltage.VoltageGraph;
+import org.robots.AvoidanceState;
 import org.robots.GeometricCycleLatticeRobot;
 import org.simulation.Edge;
 import org.utils.MathUtils;
@@ -60,6 +61,12 @@ public class CyclebuilderComms extends CommunicationSystem {
     private HashMap<Integer, Observation> observations;
     private boolean waitThisTimeStep;
 
+    /**
+     * Tick-rate collision policy. Held by composition: it decides where to aim when
+     * something is in the way, and knows nothing about the cycle-building protocol.
+     */
+    private final AvoidancePolicy policy;
+
     // Logging / instrumentation support (see CommsSnapshot, org.logging package)
     private ArrayList<OutgoingMessageRecord> sentThisTick;
     // Visualization Support
@@ -77,6 +84,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.completedCycles = new HashMap<>();
         this.self = self;
         this.observations = new HashMap<>();
+        this.policy = new AvoidancePolicy(self);
         this.incomingMessages = new ConcurrentLinkedQueue<>();
         this.unableToDoAssignmentIDs = new ArrayList<>();
         this.sentThisTick = new ArrayList<>();
@@ -583,8 +591,162 @@ public class CyclebuilderComms extends CommunicationSystem {
         }
         int targetRoleID = getCurrentRole().getId();
 
-        broadcast(new TargetClaimMessage(self.getRobotId(), claim, targetRoleID));
+        // The stand-aside directive rides this beacon rather than travelling as a message
+        // of its own -- see TargetClaimMessage.getStandAsideId().
+        broadcast(new TargetClaimMessage(self.getRobotId(), claim, targetRoleID,
+                                         policy.standAsideRequest()));
         return "Broadcast target claim " + claim;
+    }
+
+    /*
+        ////////////////////////
+        COLLISION AVOIDANCE
+        ////////////////////////
+     */
+
+    /**
+     * Updates the collision policy's moving/stationary picture of the neighbourhood from
+     * the observations {@link #makeObservations()} just took. Call once per tick, right
+     * after observing.
+     */
+    public void observeMotion() {
+        policy.observeMotion(observations);
+    }
+
+    /**
+     * Turns the robot's true target into the pose it should actually drive at this tick —
+     * unchanged when the path is clear, a detour waypoint when a stationary body is in the
+     * way, or the current pose when yielding.
+     *
+     * <p>Deliberately kept out of {@link #getAssignedGlobalPosition()}. That method is
+     * what the protocol reads: the arrival gate, the occupancy check, a child's derived
+     * target and — critically — {@link #getClaimedLocalTarget()} all go through it. A
+     * detour waypoint must never reach any of them, or the contention system would start
+     * arbitrating over transient dodges instead of lattice spots. The waypoint's only
+     * consumer is {@code GeometricCycleLatticeRobot.move(double)}.
+     */
+    public OrientedPoint planMotionWaypoint(OrientedPoint trueTarget) {
+        return policy.planWaypoint(trueTarget, getParentPoseOrNull());
+    }
+
+    /**
+     * Where this robot's parent is, or null when there is no link to preserve.
+     *
+     * <p>Guarded twice over: only a cycleBuilder has a parent worth staying near, the
+     * chain list can be empty (and {@code getSenderID()} calls {@code getLast()} on it),
+     * and the parent may have drifted out of observation range.
+     */
+    private OrientedPoint getParentPoseOrNull() {
+        if (role != CycleRole.cycleBuilder || chainMemberList == null || chainMemberList.isEmpty()) {
+            return null;
+        }
+        GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
+        return parent == null ? null : parent.getPosition();
+    }
+
+    /** Drops any latched detour. Called from every role reset. */
+    public void clearDetour() {
+        policy.clearDetour();
+    }
+
+    /**
+     * Honours a stand-aside directive addressed to this robot, if there is one and this
+     * robot is in a position to act on it.
+     *
+     * <p>Runs before {@link #processMessages(int)} so that an assignment arriving on the
+     * same tick cancels the evasion rather than racing it.
+     *
+     * <p>Directives arrive on the claim beacon, not the protocol queue, which is what
+     * makes this work at all. The protocol queue is gated behind {@code pendingChildID},
+     * pops one message a tick, and — decisively — the {@code unassigned} branch of
+     * {@code processMessages} discards anything that is not a positioning or promotion
+     * message, so a directive routed there would simply be thrown away by the only role
+     * that can honour it.
+     */
+    public void consumeStandAside() {
+        if (!canHonourStandAside()) {
+            return;
+        }
+
+        TargetClaimMessage nearest = null;
+        Observation nearestObs = null;
+        double nearestDistance = Double.POSITIVE_INFINITY;
+        OrientedPoint origin = new OrientedPoint(0, 0, 0);
+
+        for (ClaimEntry entry : incomingClaims.values()) {
+            TargetClaimMessage claim = entry.claim();
+            if (claim.getStandAsideId() != self.getRobotId()) {
+                continue;
+            }
+            Observation obs = observations.get(claim.getSenderId());
+            if (obs == null) {
+                continue;   // asked by someone this robot cannot currently see
+            }
+            double distance = obs.getLocalPosition().distance(origin);
+            // Nearest asker wins -- it is the one most likely to actually collide. Ties
+            // broken on lower id so iteration order cannot decide.
+            if (distance < nearestDistance
+                    || (distance == nearestDistance && claim.getSenderId() < nearest.getSenderId())) {
+                nearestDistance = distance;
+                nearest = claim;
+                nearestObs = obs;
+            }
+        }
+
+        if (nearest == null) {
+            return;
+        }
+
+        OrientedPoint corridorStart = nearestObs.getLocalPosition();
+        OrientedPoint corridorEnd = claimInMyFrame(corridorStart, nearest.getClaimInSenderFrame());
+        policy.onStandAside(corridorStart, corridorEnd, observations, nearest.getSenderId());
+        log("-> standing aside for robot " + nearest.getSenderId());
+    }
+
+    /**
+     * Whether this robot may act on a stand-aside directive.
+     *
+     * <p>Narrower than "not anchored", deliberately. A root or a stable is an anchor. A
+     * cycleBuilder still en route has a live assignment of its own and must not be pushed
+     * off it. And a cycleBuilder that has <em>arrived</em> must not move at all: its
+     * children derive their targets from its pose, so shifting it would drag the whole
+     * subtree. That leaves exactly one role, which is why the requester never needs to
+     * sense who it is asking — everyone else silently drops the request.
+     */
+    private boolean canHonourStandAside() {
+        return role == CycleRole.unassigned && getAssignedGlobalPosition() == null;
+    }
+
+    /** Ages any stand-aside commitment by one tick. Called once per tick, for every role. */
+    public void ageEvasion() {
+        policy.ageEvasion();
+    }
+
+    /**
+     * Where this robot is stepping aside to, or null.
+     *
+     * <p>Deliberately <em>not</em> folded into {@link #getAssignedGlobalPosition()}. That
+     * method is the protocol's notion of a target; an evasion is a motion waypoint and
+     * nothing more. Keeping them apart is what guarantees an evading robot broadcasts no
+     * claim and never enters contention.
+     */
+    public OrientedPoint getEvasionGlobalPosition() {
+        return policy.evasionGlobalTarget();
+    }
+
+    /** Abandons any stand-aside commitment. */
+    public void cancelEvasion() {
+        policy.cancelEvasion();
+    }
+
+    /** What the collision policy decided this tick. Overlay and tick log only. */
+    public AvoidanceState getPlannedAvoidanceState() {
+        return policy.state();
+    }
+
+    /** The neighbour currently in the way, or -1. Overlay and tick log only. */
+    public int getBlockingObstacleId() {
+        return policy.blockingObstacleId();
     }
 
     /** True if (aParked, aID) outranks (bParked, bID): possession first, then lower id. */
@@ -650,6 +812,11 @@ public class CyclebuilderComms extends CommunicationSystem {
      *
      * @return a description of the contention for the tick log, or null if there was none
      */
+    /** Resolves contention against the observations {@link #makeObservations()} just took. */
+    public String detectAssignmentContention() {
+        return detectAssignmentContention(observations);
+    }
+
     public String detectAssignmentContention(HashMap<Integer, Observation> phaseObservations) {
         OrientedPoint myClaim = getClaimedLocalTarget();
         if (myClaim == null) {
@@ -1054,6 +1221,9 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     public void promoteToPrimaryRoot() {
         role = CycleRole.root;
+        // An anchor has no business still stepping aside for anyone.
+        policy.cancelEvasion();
+        policy.clearDetour();
         initializeEdgeMap();
     }
 
@@ -1180,6 +1350,8 @@ public class CyclebuilderComms extends CommunicationSystem {
      * reset() above only in that it also clears stableID.
      */
     public void resetToUnassigned() {
+        // The latched detour was chosen against a target this reset is discarding.
+        policy.clearDetour();
         this.stableID = -1;
         this.pendingChildID = -1;
         this.pendingChildEdge = null;
@@ -1203,6 +1375,12 @@ public class CyclebuilderComms extends CommunicationSystem {
      * unassigned -> cycleBuilder PositioningMessage handling does today.
      */
     public void resetToCycleBuilder() {
+        // The latched detour was chosen against a target this reset is discarding.
+        policy.clearDetour();
+        // A real assignment always beats getting out of someone's way. Placed here rather
+        // than at each call site because the unassigned -> cycleBuilder path already
+        // routes through this method, so one edit covers every way an assignment lands.
+        policy.cancelEvasion();
         this.stableID = -1;
         this.pendingChildID = -1;
         this.pendingChildEdge = null;
@@ -1228,6 +1406,10 @@ public class CyclebuilderComms extends CommunicationSystem {
      * this reset exists to avoid corrupting.
      */
     public void resetToRoot() {
+        // The latched detour was chosen against a target this reset is discarding.
+        policy.clearDetour();
+        // A promoted robot is an anchor; it has no business still stepping aside.
+        policy.cancelEvasion();
         this.pendingChildID = -1;
         this.pendingChildEdge = null;
         this.chainMemberList = new ChainMemberList();

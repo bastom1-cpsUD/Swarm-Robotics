@@ -90,7 +90,17 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     private CopyOnWriteArrayList<Edge> edges;
     private ArrayList<GeometricCycleLatticeRobot> neighbors;
 
-    private OrientedPoint assignedPosition;
+    /**
+     * The pose {@link #move(double)} drives at — the lattice target when the path is
+     * clear, a detour waypoint or a hold when it is not.
+     *
+     * <p>Volatile because it is written by this robot's tick task and read by the shared
+     * 30 fps motion task, which hold only the read lock and therefore genuinely run
+     * concurrently. Reference assignment is atomic but carries no visibility guarantee
+     * without this. Safe only because every write installs a fresh {@code OrientedPoint};
+     * the pointed-to object must never be mutated in place.
+     */
+    private volatile OrientedPoint assignedPosition;
     private boolean isMovingToAssignedPosition = false;
 
     /**
@@ -98,9 +108,6 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
      * motion task, read by the render thread, hence volatile.
      */
     private volatile boolean lastStepVetoed = false;
-
-    /** What the avoidance layer is doing to this robot's motion; overlay/log only. */
-    private volatile AvoidanceState avoidanceState = AvoidanceState.CLEAR;
 
     // ------------------------------------------------------------
     // Constructor
@@ -187,6 +194,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
 
         commsSystem.beginTick();
         commsSystem.expireStaleClaims();
+        commsSystem.ageEvasion();
 
         String processed;
         String action;
@@ -198,15 +206,29 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
                 action = commsSystem.sendMessage(true, tick);
             }
             default -> {
-                String contention = commsSystem.detectAssignmentContention(commsSystem.makeObservations());
-                
+                commsSystem.makeObservations();
+
+                // Classify who is moving before anything reads that classification. Must
+                // also run before next tick overwrites the observations it diffs against.
+                commsSystem.observeMotion();
+
+                // Before processMessages, so an assignment landing this tick cancels an
+                // evasion rather than racing it.
+                commsSystem.consumeStandAside();
+
+                String contention = commsSystem.detectAssignmentContention();
+
                 // 1. Process incoming messages
                 processed = commsSystem.processMessages(tick);
 
                 // 2. Ask comms system for current target, 3. broadcast
                 action = commsSystem.sendMessage(updateAssignedPosition(), tick);
 
-                action = contention != null ? contention + " | " + action: action;                   
+                action = contention != null ? contention + " | " + action: action;
+
+                // Last, because it needs the true target that updateAssignedPosition just
+                // installed, and because it replaces that target with a detour or a hold.
+                applyAvoidanceWaypoint();
             }
         }
         //Broadcast claim after processing messages for contention processing
@@ -261,12 +283,41 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
             assignedPosition = new OrientedPoint(target);
             isMovingToAssignedPosition = true;
         } else {
-            //No live assignment (e.g. we just became unassigned due target being occupied)
-            assignedPosition = new OrientedPoint(pose);
-            isMovingToAssignedPosition = false;
+            // No live assignment (e.g. we just became unassigned because the target was
+            // occupied). This is the one and only place an evasion target is consulted,
+            // and it is deliberately not the same notion as an assignment: it is a motion
+            // waypoint, never a lattice claim. getClaimedLocalTarget() short-circuits on
+            // role != cycleBuilder, so an evading robot broadcasts nothing and cannot
+            // enter contention; getAssignedGlobalPosition() still returns null here, so
+            // the arrival gate, the occupancy check and any child's derived target are all
+            // untouched.
+            //
+            // No snap either -- the snap above exists to hold ideal lattice poses exact so
+            // children's targets do not drift, and a sidestep is not an ideal pose.
+            OrientedPoint evade = commsSystem.getEvasionGlobalPosition();
+            assignedPosition = new OrientedPoint(evade != null ? evade : pose);
+            isMovingToAssignedPosition = (evade != null);
         }
 
         return atPos;
+    }
+
+    /**
+     * Replaces the motion waypoint with whatever the collision policy decided — the true
+     * target when the path is clear, a detour waypoint around a stationary body, or this
+     * robot's own pose when it is yielding.
+     *
+     * <p>Writing into {@code assignedPosition} is what keeps the two systems apart. That
+     * field has exactly one consumer, {@link #move(double)}; the protocol reads
+     * {@code CyclebuilderComms.getAssignedGlobalPosition()}, which nothing here touches.
+     * So a detour can never be mistaken for a lattice claim, reach the arrival gate, or
+     * propagate into a child's derived target.
+     */
+    private void applyAvoidanceWaypoint() {
+        OrientedPoint planned = commsSystem.planMotionWaypoint(assignedPosition);
+        if (planned != null) {
+            assignedPosition = planned;
+        }
     }
 
     // ------------------------------------------------------------
@@ -306,12 +357,10 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
 
         if (!stepIsPermitted(candidate)) {
             lastStepVetoed = true;
-            avoidanceState = AvoidanceState.BLOCKED;
             return;
         }
 
         lastStepVetoed = false;
-        avoidanceState = AvoidanceState.CLEAR;
         pose.x = candidate.x;
         pose.y = candidate.y;
         pose.orientation = candidate.orientation;
@@ -371,9 +420,24 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
         return lastStepVetoed;
     }
 
-    /** What the avoidance layer is doing to this robot's motion. Overlay/log only. */
+    /**
+     * What the avoidance layer is doing to this robot's motion. Overlay and tick log only.
+     *
+     * <p>Combined from two sources rather than stored: the tick-rate policy says what was
+     * <em>planned</em>, and the motion-rate guard says whether the last frame was actually
+     * refused. A veto wins, because it is the more recent and more concrete fact — a robot
+     * that planned a detour but is being physically stopped is blocked, not detouring.
+     */
     public AvoidanceState getAvoidanceState() {
-        return avoidanceState;
+        if (lastStepVetoed) {
+            return AvoidanceState.BLOCKED;
+        }
+        return commsSystem.getPlannedAvoidanceState();
+    }
+
+    /** The neighbour currently in this robot's way, or -1. Overlay and tick log only. */
+    public int getBlockingObstacleId() {
+        return commsSystem.getBlockingObstacleId();
     }
 
     /** One tick of travel at full speed — the quantity {@code CyclebuilderComms} calls gamma. */
