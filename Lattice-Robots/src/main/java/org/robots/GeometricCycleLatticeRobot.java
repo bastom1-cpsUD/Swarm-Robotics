@@ -230,6 +230,16 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
                 // Last, because it needs the true target that updateAssignedPosition just
                 // installed, and because it replaces that target with a detour or a hold.
                 applyAvoidanceWaypoint();
+
+                // The collision layer's top liveness rung. Runs after planning, because
+                // planning is what decides this robot has run out of options, and before
+                // the beacon below, so a spot just given up is not still being claimed.
+                String gaveUp = commsSystem.applyLivenessGiveUp();
+                if (gaveUp != null) {
+                    // The assignment is gone; stop driving at it this tick rather than next.
+                    updateAssignedPosition();
+                    action = action + " | " + gaveUp;
+                }
             }
         }
         //Broadcast claim after processing messages for contention processing

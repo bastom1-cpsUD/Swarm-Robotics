@@ -650,6 +650,41 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     /**
+     * Acts on the collision layer's top liveness rung: a cycleBuilder that has made no
+     * progress for long enough gives its assignment up, so the parent can offer the spot
+     * to somebody who can physically reach it.
+     *
+     * <p>This is the collision layer degrading into the existing protocol rather than
+     * inventing an escape of its own. The teardown is the same sequence
+     * {@link #detectAssignmentContention(HashMap)} uses when it yields, in the same order:
+     * the rejection has to go out <em>before</em> {@link #resetToUnassigned()}, which
+     * clears the chain list the parent is read from.
+     *
+     * <p>Retryability is decided by {@code AvoidancePolicy.giveUpIsPermanent()} — see
+     * there for why getting it backwards would introduce a livelock into the protocol.
+     *
+     * @return a description for the tick log, or null if nothing was given up
+     */
+    public String applyLivenessGiveUp() {
+        if (role != CycleRole.cycleBuilder || !policy.giveUpRequested()) {
+            return null;
+        }
+
+        boolean permanent = policy.giveUpIsPermanent();
+        int blocker = policy.blockingObstacleId();
+
+        forwardRejectionToParent(!permanent);
+        resetToUnassigned();
+        hasBeenAssigned = false;
+        self.clearEdges();
+
+        log("-> gave up assignment: no progress past robot " + blocker
+                + (permanent ? " (permanent obstruction, not retryable)" : " (transient, retryable)"));
+        return "Gave up assignment, blocked by robot " + blocker
+                + (permanent ? " (NOT RETRYABLE)" : " (RETRYABLE)");
+    }
+
+    /**
      * Honours a stand-aside directive addressed to this robot, if there is one and this
      * robot is in a position to act on it.
      *
@@ -911,10 +946,24 @@ public class CyclebuilderComms extends CommunicationSystem {
         send(parent, sm);
     }
 
+    /**
+     * Reports failure to the parent and stands down.
+     *
+     * <p>Guarded on both the empty chain list ({@code getSenderID} calls {@code getLast})
+     * and a parent that is no longer observable. Both are reachable exactly when this is
+     * called: a robot reports failure when it is stuck, and being stuck is correlated with
+     * a parent having drifted out of range. The stand-down still happens either way — an
+     * undeliverable report is no reason to stay a wedged cycleBuilder.
+     */
     private void forwardFailureUpstream() {
-        GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
-        StatusMessage sm = new StatusMessage(self.getRobotId(), parent.getRobotId(), false, originVertexID, originOutgoingEdgeID);
-        send(parent, sm);
+        GeometricCycleLatticeRobot parent = chainMemberList.isEmpty()
+                ? null : getNeighborByID(chainMemberList.getSenderID());
+        if (parent != null) {
+            StatusMessage sm = new StatusMessage(self.getRobotId(), parent.getRobotId(), false, originVertexID, originOutgoingEdgeID);
+            send(parent, sm);
+        } else {
+            log("-> cannot report failure: parent unreachable, standing down anyway");
+        }
         resetToUnassigned();
     }
 
@@ -933,8 +982,21 @@ public class CyclebuilderComms extends CommunicationSystem {
         if(!(robot == null)) send(robot, rm);
     }
 
+    /**
+     * Rejects this robot's assignment back to its parent.
+     *
+     * <p>Same guards, same reason, as {@link #forwardFailureUpstream()}. Callers always
+     * follow this with their own teardown, so an undeliverable rejection costs only the
+     * parent's knowledge of it — the parent independently notices the child leaving via
+     * the {@code childHasLeft} check in {@link #makeObservations()}.
+     */
     private void forwardRejectionToParent(boolean isRetryable) {
-        GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
+        GeometricCycleLatticeRobot parent = chainMemberList.isEmpty()
+                ? null : getNeighborByID(chainMemberList.getSenderID());
+        if (parent == null) {
+            log("-> cannot reject to parent: unreachable");
+            return;
+        }
         RejectAssignmentMessage rm = new RejectAssignmentMessage(self.getRobotId(), parent.getRobotId(), originVertexID, originOutgoingEdgeID, isRetryable);
         send(parent, rm);
     }
@@ -1352,6 +1414,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     public void resetToUnassigned() {
         // The latched detour was chosen against a target this reset is discarding.
         policy.clearDetour();
+        policy.resetProgress();
         this.stableID = -1;
         this.pendingChildID = -1;
         this.pendingChildEdge = null;
@@ -1377,6 +1440,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     public void resetToCycleBuilder() {
         // The latched detour was chosen against a target this reset is discarding.
         policy.clearDetour();
+        policy.resetProgress();
         // A real assignment always beats getting out of someone's way. Placed here rather
         // than at each call site because the unassigned -> cycleBuilder path already
         // routes through this method, so one edit covers every way an assignment lands.
@@ -1408,6 +1472,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     public void resetToRoot() {
         // The latched detour was chosen against a target this reset is discarding.
         policy.clearDetour();
+        policy.resetProgress();
         // A promoted robot is an anchor; it has no business still stepping aside.
         policy.cancelEvasion();
         this.pendingChildID = -1;

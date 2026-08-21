@@ -61,6 +61,7 @@ public final class AvoidancePolicy {
      */
     private static final double ON_CORRIDOR_TOLERANCE = 1.0;
 
+
     // --- stationarity classifier -------------------------------------------------
     /** Last tick's observations, in the frame this robot occupied at that time. */
     private final Map<Integer, OrientedPoint> previousObserved = new HashMap<>();
@@ -88,6 +89,18 @@ public final class AvoidancePolicy {
     private OrientedPoint evasionTarget;
     private int evasionTicksRemaining = 0;
     private int evasionAgeTicks = 0;
+
+    // --- liveness ladder -----------------------------------------------------------
+    /** Consecutive ticks this robot has wanted to move but has not actually got anywhere. */
+    private int stuckTicks = 0;
+    /** Where this robot stood at the previous tick, for judging its own progress. */
+    private OrientedPoint lastProgressPose;
+    /** True while every tick of the current stall has been against a stationary blocker. */
+    private boolean stalledOnStationary = true;
+    /** Set when the top rung fires; the host tears the assignment down and clears it. */
+    private boolean giveUpRequested = false;
+    /** Whether the give-up should ban this robot as a candidate. See {@link #giveUpIsPermanent()}. */
+    private boolean giveUpIsPermanent = false;
 
     // --- reporting (overlay / tick log only) ---------------------------------------
     private AvoidanceState state = AvoidanceState.CLEAR;
@@ -200,6 +213,7 @@ public final class AvoidancePolicy {
 
         if (trueTarget == null) {
             clearDetour();
+            resetProgress();
             state = AvoidanceState.CLEAR;
             blockingObstacleId = -1;
             return null;
@@ -207,6 +221,8 @@ public final class AvoidancePolicy {
 
         final OrientedPoint here = self.getPosition();
         final double keepOut = GeometricCycleLatticeRobot.KEEP_OUT;
+
+        updateProgress(here, trueTarget);
 
         GeometricCycleLatticeRobot blocker = nearestBlocker(here, trueTarget, keepOut);
         if (blocker == null) {
@@ -217,6 +233,42 @@ public final class AvoidancePolicy {
         }
 
         blockingObstacleId = blocker.getRobotId();
+
+        // Track whether this stall has been entirely against something that never moves.
+        // That distinction decides, at the top rung, whether giving up bans this robot as
+        // a candidate for the spot -- see giveUpIsPermanent().
+        //
+        // Only sampled once the ladder is actually escalating. Before that the classifier
+        // is still warming up -- a neighbour reads as "moving" for its first few ticks
+        // simply because there is not yet a displacement history for it -- and sampling
+        // through that window would latch every stall as transient, permanently, since
+        // nothing but real progress ever clears the flag.
+        if (stuckTicks >= holdLimitTicks() && !isStationary(blocker.getRobotId())) {
+            stalledOnStationary = false;
+        }
+
+        // Top rung: genuinely wedged. Hand the decision back to the protocol, which knows
+        // how to offer the spot to somebody else.
+        if (stuckTicks >= 3 * holdLimitTicks()) {
+            giveUpRequested = true;
+            giveUpIsPermanent = stalledOnStationary;
+            state = AvoidanceState.BLOCKED;
+            return new OrientedPoint(here);
+        }
+
+        // First rung: ask the blocker to move. Free -- it rides a beacon already going out
+        // -- and anchored blockers simply ignore it.
+        if (stuckTicks >= holdLimitTicks()) {
+            standAsideRequest = blocker.getRobotId();
+        }
+
+        // Second rung: back off toward the parent. This strictly increases tether slack, so
+        // it can never break the parent link, and it frequently opens a feasible detour on
+        // the next tick simply by changing the geometry.
+        if (stuckTicks >= 2 * holdLimitTicks() && parent != null) {
+            state = AvoidanceState.BLOCKED;
+            return stepToward(here, parent, GeometricCycleLatticeRobot.tickTravel());
+        }
 
         if (!isStationary(blocker.getRobotId())) {
             clearDetour();
@@ -260,6 +312,89 @@ public final class AvoidancePolicy {
 
         state = AvoidanceState.DETOURING;
         return AvoidanceGeometry.tangentWaypoint(here, obstacle, keepOut, reach, sign);
+    }
+
+    /**
+     * Counts consecutive ticks in which this robot wanted to move but did not get
+     * anywhere, which is what every rung of the liveness ladder is measured against.
+     *
+     * <p>Measured on actual displacement rather than on any of the policy's own decisions.
+     * A robot can be stuck for reasons the policy never sees — the motion-rate guard
+     * refusing every frame, a target it cannot physically reach — and those are exactly
+     * the cases the ladder exists to escape. Reading the outcome rather than the intent is
+     * what makes it cover them.
+     */
+    private void updateProgress(OrientedPoint here, OrientedPoint trueTarget) {
+        boolean wantsToMove = here.distance(trueTarget) > MathUtils.EPSILON;
+        boolean moved = lastProgressPose == null
+                || here.distance(lastProgressPose) >= stationaryDisplacement();
+
+        if (!wantsToMove || moved) {
+            resetProgress();
+        } else {
+            stuckTicks++;
+        }
+        lastProgressPose = new OrientedPoint(here);
+    }
+
+    /**
+     * Clears the stall counter. Called on any progress, and on every role reset — without
+     * that, a robot that just gave one assignment up would arrive at its next one with the
+     * counter already past the top rung and abandon it immediately.
+     */
+    public void resetProgress() {
+        stuckTicks = 0;
+        stalledOnStationary = true;
+        giveUpRequested = false;
+        giveUpIsPermanent = false;
+    }
+
+    /** A point one {@code distance} from {@code from} along the line toward {@code toward}. */
+    private static OrientedPoint stepToward(OrientedPoint from, OrientedPoint toward, double distance) {
+        double dx = toward.x - from.x;
+        double dy = toward.y - from.y;
+        double gap = Math.hypot(dx, dy);
+        if (gap <= 0.0) {
+            return new OrientedPoint(from);
+        }
+        double step = Math.min(distance, gap);
+        return new OrientedPoint(from.x + dx / gap * step,
+                                 from.y + dy / gap * step,
+                                 Math.atan2(dy, dx));
+    }
+
+    /**
+     * Whether the top rung has fired and the host should tear this assignment down.
+     *
+     * <p>Deliberately reported rather than acted on here. Unwinding an assignment means
+     * rejecting to a parent, clearing edges and resetting a role — protocol work that
+     * belongs to {@code CyclebuilderComms}, not to a motion planner.
+     */
+    public boolean giveUpRequested() {
+        return giveUpRequested;
+    }
+
+    /**
+     * Whether the give-up should be reported as non-retryable, banning this robot as a
+     * candidate for the spot.
+     *
+     * <p><b>This is the sharpest decision in the whole layer.</b> A non-retryable rejection
+     * appends this robot to the parent's {@code unableToDoAssignmentIDs}, monotonically
+     * shrinking a finite candidate set — so the parent must terminate, either by finding a
+     * candidate that can physically reach the spot or by reporting failure through the
+     * existing path.
+     *
+     * <p>Getting it backwards would introduce a livelock into the protocol the collision
+     * layer was meant to protect: a retryable rejection does not ban the candidate, so
+     * against a permanent geometric obstruction the parent would re-offer the same spot to
+     * the same wedged robot forever.
+     *
+     * <p>So: permanent when the whole stall was against something that never moved,
+     * retryable when anything moving was involved, because that may simply have been bad
+     * timing.
+     */
+    public boolean giveUpIsPermanent() {
+        return giveUpIsPermanent;
     }
 
     /**
@@ -536,4 +671,18 @@ public final class AvoidancePolicy {
         return Math.max(2, GeometricCycleLatticeRobot.ticksToTravel(GeometricCycleLatticeRobot.BODY_RADIUS));
     }
 
+    /**
+     * Ticks of no progress before the liveness ladder escalates one rung. Rungs fire at
+     * one, two and three times this: ask the blocker to move, retreat toward the parent,
+     * then give the assignment up.
+     *
+     * <p>Sized as the time to travel one keep-out diameter, so it scales with the body and
+     * the tick rate rather than being a bare count. Floored well above
+     * {@link #stationaryConfirmTicks()} so a blocker is always classified long before the
+     * ladder acts on that classification.
+     */
+    private static int holdLimitTicks() {
+        return Math.max(2 * stationaryConfirmTicks(),
+                GeometricCycleLatticeRobot.ticksToTravel(GeometricCycleLatticeRobot.KEEP_OUT));
+    }
 }
