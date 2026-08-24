@@ -30,6 +30,7 @@ import org.utils.logging.TickRecord;
 import org.motionModels.LatticeMotionModel;
 import org.motionModels.TimeStepDiffDrive;
 import org.simulation.Edge;
+import org.utils.AvoidanceGeometry;
 import org.utils.MathUtils;
 
 /**
@@ -44,8 +45,43 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     /**
      * Robot activations per second. One activation is one <em>tick</em>.
      */
-    public static final double TICK_RATE = 1.0;
+    public static final double DEFAULT_TICK_RATE = 1.0;
     public static final VoltageGraph GRAPH = SnubSquareVoltageGraph.build();
+    private static volatile double currentTickRate = DEFAULT_TICK_RATE;
+
+    /**
+     * Radius of this robot's physical bubble. Two robots are in collision when their
+     * centres are closer than {@link #KEEP_OUT}.
+     *
+     * <p><b>INVARIANT:</b> {@code 2 * BODY_RADIUS} must be strictly less than the shortest
+     * edge length of every lattice in {@code org.graphs.voltage} — currently 50.0
+     * (Hexagon, Triangle, OctagonSquare, SnubHexagon, ElongatedTriangular,
+     * HexagonTriangle, HexagonSquareTriangle and both Dodecagon variants; SnubSquare and
+     * Square are 70.0). Violating it makes two adjacent lattice spots permanently
+     * collide, so no formation could ever close.
+     *
+     * <p>This is a <em>clearance</em> radius, deliberately smaller than the triangle
+     * {@code TriangularModel} draws, whose nose vertex reaches
+     * {@code 1.2 * 30/sqrt(3) = 20.78}. Sizing the bubble to the drawn hull would put 19
+     * of the 100 robots in the shipped dataset in overlap before the first tick, against
+     * 1 at 15.0. The bubble overlay (B key) draws the true bubble, so the discrepancy
+     * stays visible rather than hidden. Retune alongside
+     * {@code TriangularModel.ROBOT_SIZE}.
+     */
+    public static final double BODY_RADIUS = 15.0;
+
+    /**
+     * Centre-to-centre separation below which two robots are in collision.
+     *
+     * <p>The hard guard in {@link #move(double)} enforces this with <em>zero</em> safety
+     * margin, which is correct only while {@code AsyncRobotPanel}'s motion task moves all
+     * robots sequentially on a single thread: each robot then tests against neighbour
+     * positions that are fully committed, so no pair can slip past each other's checks.
+     * If motion is ever parallelised across robots, each must instead be tested against a
+     * <em>snapshot</em> of neighbour poses taken before the frame, and this constant must
+     * grow by one frame's travel ({@code MAX_LINEAR_SPEED / RENDER_FPS}, about 0.33).
+     */
+    public static final double KEEP_OUT = 2.0 * BODY_RADIUS;
     // ------------------------------------------------------------
     // Fields
     // ------------------------------------------------------------
@@ -55,8 +91,24 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     private CopyOnWriteArrayList<Edge> edges;
     private ArrayList<GeometricCycleLatticeRobot> neighbors;
 
-    private OrientedPoint assignedPosition;
+    /**
+     * The pose {@link #move(double)} drives at — the lattice target when the path is
+     * clear, a detour waypoint or a hold when it is not.
+     *
+     * <p>Volatile because it is written by this robot's tick task and read by the shared
+     * 30 fps motion task, which hold only the read lock and therefore genuinely run
+     * concurrently. Reference assignment is atomic but carries no visibility guarantee
+     * without this. Safe only because every write installs a fresh {@code OrientedPoint};
+     * the pointed-to object must never be mutated in place.
+     */
+    private volatile OrientedPoint assignedPosition;
     private boolean isMovingToAssignedPosition = false;
+
+    /**
+     * Whether the last motion frame's step was refused by the hard guard. Written by the
+     * motion task, read by the render thread, hence volatile.
+     */
+    private volatile boolean lastStepVetoed = false;
 
     // ------------------------------------------------------------
     // Constructor
@@ -143,6 +195,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
 
         commsSystem.beginTick();
         commsSystem.expireStaleClaims();
+        commsSystem.ageEvasion();
 
         String processed;
         String action;
@@ -154,15 +207,39 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
                 action = commsSystem.sendMessage(true, tick);
             }
             default -> {
-                String contention = commsSystem.detectAssignmentContention(commsSystem.makeObservations());
-                
+                commsSystem.makeObservations();
+
+                // Classify who is moving before anything reads that classification. Must
+                // also run before next tick overwrites the observations it diffs against.
+                commsSystem.observeMotion();
+
+                // Before processMessages, so an assignment landing this tick cancels an
+                // evasion rather than racing it.
+                commsSystem.consumeStandAside();
+
+                String contention = commsSystem.detectAssignmentContention();
+
                 // 1. Process incoming messages
                 processed = commsSystem.processMessages(tick);
 
                 // 2. Ask comms system for current target, 3. broadcast
                 action = commsSystem.sendMessage(updateAssignedPosition(), tick);
 
-                action = contention != null ? contention + " | " + action: action;                   
+                action = contention != null ? contention + " | " + action: action;
+
+                // Last, because it needs the true target that updateAssignedPosition just
+                // installed, and because it replaces that target with a detour or a hold.
+                applyAvoidanceWaypoint();
+
+                // The collision layer's top liveness rung. Runs after planning, because
+                // planning is what decides this robot has run out of options, and before
+                // the beacon below, so a spot just given up is not still being claimed.
+                String gaveUp = commsSystem.applyLivenessGiveUp();
+                if (gaveUp != null) {
+                    // The assignment is gone; stop driving at it this tick rather than next.
+                    updateAssignedPosition();
+                    action = action + " | " + gaveUp;
+                }
             }
         }
         //Broadcast claim after processing messages for contention processing
@@ -217,22 +294,109 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
             assignedPosition = new OrientedPoint(target);
             isMovingToAssignedPosition = true;
         } else {
-            //No live assignment (e.g. we just became unassigned due target being occupied)
-            assignedPosition = new OrientedPoint(pose);
-            isMovingToAssignedPosition = false;
+            // No live assignment (e.g. we just became unassigned because the target was
+            // occupied). This is the one and only place an evasion target is consulted,
+            // and it is deliberately not the same notion as an assignment: it is a motion
+            // waypoint, never a lattice claim. getClaimedLocalTarget() short-circuits on
+            // role != cycleBuilder, so an evading robot broadcasts nothing and cannot
+            // enter contention; getAssignedGlobalPosition() still returns null here, so
+            // the arrival gate, the occupancy check and any child's derived target are all
+            // untouched.
+            //
+            // No snap either -- the snap above exists to hold ideal lattice poses exact so
+            // children's targets do not drift, and a sidestep is not an ideal pose.
+            OrientedPoint evade = commsSystem.getEvasionGlobalPosition();
+            assignedPosition = new OrientedPoint(evade != null ? evade : pose);
+            isMovingToAssignedPosition = (evade != null);
         }
 
         return atPos;
     }
 
+    /**
+     * Replaces the motion waypoint with whatever the collision policy decided — the true
+     * target when the path is clear, a detour waypoint around a stationary body, or this
+     * robot's own pose when it is yielding.
+     *
+     * <p>Writing into {@code assignedPosition} is what keeps the two systems apart. That
+     * field has exactly one consumer, {@link #move(double)}; the protocol reads
+     * {@code CyclebuilderComms.getAssignedGlobalPosition()}, which nothing here touches.
+     * So a detour can never be mistaken for a lattice claim, reach the arrival gate, or
+     * propagate into a child's derived target.
+     */
+    private void applyAvoidanceWaypoint() {
+        OrientedPoint planned = commsSystem.planMotionWaypoint(assignedPosition);
+        if (planned != null) {
+            assignedPosition = planned;
+        }
+    }
+
     // ------------------------------------------------------------
     // Motion
     // ------------------------------------------------------------
+    /**
+     * Advances this robot one motion frame toward its current waypoint, refusing any step
+     * that would drive a body into a neighbour.
+     *
+     * <p>This is the collision layer's <strong>guarantee</strong>, and it is deliberately
+     * the only place one lives. It runs at motion rate (30 fps) rather than tick rate
+     * (1 Hz) because a decision taken once per tick is open-loop for roughly thirty motion
+     * frames and therefore cannot guarantee anything. It classifies nothing, sends nothing
+     * and reads no protocol state — it is a proximity sensor plus a veto, and a real
+     * platform's bumper likewise runs faster than its radio.
+     *
+     * <p>The step is <em>speculated on a copy</em> rather than taken and rolled back.
+     * {@code TimeStepDiffDrive.moveTo} mutates the pose it is handed in place, and rebuilds
+     * its {@code moveState} and wheel velocities from scratch on every call, so a discarded
+     * candidate leaks nothing except an inflated {@code distTraveled} counter — telemetry
+     * only, read by no decision.
+     *
+     * <p>One bypass exists and is tolerated: {@link #updateAssignedPosition()}'s arrival
+     * branch writes {@code pose} directly, outside this method. That write is bounded by
+     * the arrival gate to {@link MathUtils#EPSILON}, four orders of magnitude below
+     * {@link #KEEP_OUT}, so it cannot produce a consequential overlap.
+     */
     @Override
     public void move(double dt) {
-        if (assignedPosition != null) {
-            latticeMotionModel.moveTo(pose, assignedPosition, dt);
+        OrientedPoint waypoint = assignedPosition;
+        if (waypoint == null) {
+            return;
         }
+
+        OrientedPoint candidate = new OrientedPoint(pose);
+        latticeMotionModel.moveTo(candidate, waypoint, dt);
+
+        if (!stepIsPermitted(candidate)) {
+            lastStepVetoed = true;
+            return;
+        }
+
+        lastStepVetoed = false;
+        pose.x = candidate.x;
+        pose.y = candidate.y;
+        pose.orientation = candidate.orientation;
+    }
+
+    /**
+     * Whether a candidate pose may be committed, tested against every neighbour.
+     *
+     * <p>Iterates the {@code neighbors} field directly rather than through
+     * {@link #getNeighbors()}: this runs thirty times a second for every robot and the
+     * accessor allocates a defensive copy per call. Doing so is safe without added
+     * synchronization because the list is only ever restructured by
+     * {@code AsyncRobotPanel.runProximityCheck()} under the <b>write</b> lock, which
+     * excludes the motion task holding the read lock.
+     *
+     * @param candidate the pose the motion model produced for this frame
+     * @return true if no neighbour vetoes the step
+     */
+    private boolean stepIsPermitted(OrientedPoint candidate) {
+        for (GeometricCycleLatticeRobot other : neighbors) {
+            if (!AvoidanceGeometry.permitsStep(pose, candidate, other.getPosition(), KEEP_OUT)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ------------------------------------------------------------
@@ -262,8 +426,59 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
         return isMovingToAssignedPosition;
     }
 
+    /** Whether the hard guard refused the most recent motion frame. Overlay/log only. */
+    public boolean wasStepVetoed() {
+        return lastStepVetoed;
+    }
+
+    /**
+     * What the avoidance layer is doing to this robot's motion. Overlay and tick log only.
+     *
+     * <p>Combined from two sources rather than stored: the tick-rate policy says what was
+     * <em>planned</em>, and the motion-rate guard says whether the last frame was actually
+     * refused. A veto wins, because it is the more recent and more concrete fact — a robot
+     * that planned a detour but is being physically stopped is blocked, not detouring.
+     */
+    public AvoidanceState getAvoidanceState() {
+        if (lastStepVetoed) {
+            return AvoidanceState.BLOCKED;
+        }
+        return commsSystem.getPlannedAvoidanceState();
+    }
+
+    /** The neighbour currently in this robot's way, or -1. Overlay and tick log only. */
+    public int getBlockingObstacleId() {
+        return commsSystem.getBlockingObstacleId();
+    }
+
+    /** One tick of travel at full speed — the quantity {@code CyclebuilderComms} calls gamma. */
+    public static double tickTravel() {
+        return TimeStepDiffDrive.MAX_LINEAR_SPEED / tickRate();
+    }
+
+    /** Ticks needed to cover {@code distance} at full speed, at the current rate. */
+    public static int ticksToTravel(double distance) {
+        return Math.max(1, (int) Math.ceil(distance / tickTravel()));
+    }
+
+    /** Ticks spanning {@code seconds} of wall clock, at the current rate. */
+    public static int ticksFor(double seconds) {
+        return Math.max(1, (int) Math.ceil(seconds * tickRate()));
+    }
+
     public double getMaxSpeed() {
         return latticeMotionModel.getMaxSpeed();
+    }
+
+    public static double tickRate() {
+        return currentTickRate;
+    }
+
+    public static void setTickRate(double rate) {
+        if (rate <= 0.0) {
+            throw new IllegalArgumentException("Tick rate must be positive");
+        }
+        currentTickRate = rate;
     }
 
     // ------------------------------------------------------------

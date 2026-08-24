@@ -10,6 +10,18 @@ public class TriangularModel extends DrawingModel{
     
     /**
      * The size of the sides of the triangle representing the robot.
+     *
+     * <p>This is a <em>drawing</em> dimension and is deliberately not derived from
+     * {@code GeometricCycleLatticeRobot.BODY_RADIUS}: this class is a general
+     * {@code DrawingModel}, not a collaborator of that robot, and the size additionally
+     * drives the mouse hit-test through {@code Robot.contains}.
+     *
+     * <p>Be aware the two disagree today. The drawn hull's nose vertex reaches
+     * {@code 1.2 * ROBOT_SIZE / sqrt(3) = 20.78}, while the collision bubble is 15.0, so
+     * sprites can visually overlap while the bodies legally do not. That is intentional —
+     * sizing the bubble to the hull would put 19 of the 100 robots in the shipped dataset
+     * in overlap before the first tick. The B-key bubble overlay draws the true radius so
+     * the difference stays visible. Retune the two together.
      */
     private static final double ROBOT_SIZE = 30;
 

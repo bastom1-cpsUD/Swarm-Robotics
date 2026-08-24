@@ -50,9 +50,26 @@ public class AsyncRobotPanel extends JPanel {
     // ------------------------------------------------------------------
     private static final int  RENDER_FPS         = 30;
     private static final long RENDER_PERIOD_MS    = 1000L / RENDER_FPS;
-    private static final long DEFAULT_PERIOD_MS   = GeometricCycleLatticeRobot.TICK_RATE > 0.0
-            ? (long) (1000.0 / GeometricCycleLatticeRobot.TICK_RATE) : 1000L;
+    private static final long DEFAULT_PERIOD_MS   = GeometricCycleLatticeRobot.DEFAULT_TICK_RATE > 0.0
+            ? (long) (1000.0 / GeometricCycleLatticeRobot.DEFAULT_TICK_RATE) : 1000L;
     private static final long PROXIMITY_PERIOD_MS = 100L;
+
+    // ------------------------------------------------------------------
+    // Bubble-overlay colours
+    //
+    // Shared by drawBubbles and drawBubbleLegend so the two can never disagree —
+    // a legend that has drifted from what is on screen is worse than no legend.
+    // The three severity tiers are a scale (clear / near / overlap); the keep-out
+    // ring is deliberately outside that scale, in a neutral grey, because it is a
+    // measurement aid rather than a fourth severity level.
+    // ------------------------------------------------------------------
+    private static final Color BUBBLE_CLEAR_FILL = new Color( 90, 180, 120,  45);
+    private static final Color BUBBLE_CLEAR_EDGE = new Color( 60, 150,  90, 110);
+    private static final Color BUBBLE_NEAR_FILL  = new Color(230, 160,  40,  70);
+    private static final Color BUBBLE_NEAR_EDGE  = new Color(200, 130,  20, 160);
+    private static final Color BUBBLE_OVER_FILL  = new Color(220,  60,  40,  90);
+    private static final Color BUBBLE_OVER_EDGE  = new Color(200,  40,  20, 210);
+    private static final Color KEEP_OUT_RING     = new Color( 70,  78,  90, 200);
 
     // ------------------------------------------------------------------
     // Role colours
@@ -89,10 +106,12 @@ public class AsyncRobotPanel extends JPanel {
 
     // ------------------------------------------------------------------
     // Telemetry — written by executor threads, read approx by EDT
-    // Plain map is fine: stale reads of longs are acceptable for display
+    // ConcurrentHashMap because the increment below runs outside the read lock, on
+    // several executor threads at once. Stale reads remain fine for display, but the
+    // writes are real concurrent mutation, and merge() keeps them from being lost.
     // ------------------------------------------------------------------
-    private final Map<Integer, Long> tickCounts      = new LinkedHashMap<>();
-    private final Map<Integer, Long> lastActivatedMs = new LinkedHashMap<>();
+    private final Map<Integer, Long> tickCounts      = new ConcurrentHashMap<>();
+    private final Map<Integer, Long> lastActivatedMs = new ConcurrentHashMap<>();
 
     // ------------------------------------------------------------------
     // Interaction state (EDT-only)
@@ -102,6 +121,7 @@ public class AsyncRobotPanel extends JPanel {
     private double  offsetX, offsetY;
     private boolean showProximity = false;
     private boolean showStats     = false;
+    private boolean showBubbles   = false;
     private long    simStartWallMs = 0;
 
     // Control widgets
@@ -185,6 +205,7 @@ public class AsyncRobotPanel extends JPanel {
                     case KeyEvent.VK_RIGHT -> { if (!simRunning) singleStep(); }
                     case KeyEvent.VK_D     -> showProximity = !showProximity;
                     case KeyEvent.VK_T     -> showStats     = !showStats;
+                    case KeyEvent.VK_B     -> showBubbles   = !showBubbles;
                     case KeyEvent.VK_S     -> savePNG(canvas);
                     case KeyEvent.VK_J     -> {
                         lock.readLock().lock();
@@ -241,6 +262,8 @@ public class AsyncRobotPanel extends JPanel {
         slider.addChangeListener(e -> {
             periodMs = slider.getValue();
             speedLabel.setText(periodMs + " ms");
+            if (slider.getValueIsAdjusting()) return;          // still dragging
+            GeometricCycleLatticeRobot.setTickRate(1000.0 / periodMs);
             if (simRunning) rescheduleRobotTasks();
         });
         strip.add(slider);
@@ -251,6 +274,10 @@ public class AsyncRobotPanel extends JPanel {
         JButton proxBtn = darkButton("⊙  Proximity");
         proxBtn.addActionListener(e -> showProximity = !showProximity);
         strip.add(proxBtn);
+
+        JButton bubblesBtn = darkButton("⬤  Bubbles");
+        bubblesBtn.addActionListener(e -> showBubbles = !showBubbles);
+        strip.add(bubblesBtn);
 
         JButton statsBtn = darkButton("📊  Stats");
         statsBtn.addActionListener(e -> showStats = !showStats);
@@ -264,7 +291,7 @@ public class AsyncRobotPanel extends JPanel {
        logUnchangedBox.addActionListener(e -> simLogger.setLogUnchangedRobots(logUnchangedBox.isSelected()));
         strip.add(logUnchangedBox);
 
-        strip.add(dimLabel("   [Space] play/pause  [→] step  [K] load  [J] save  [T] stats  [S] screenshot"));
+        strip.add(dimLabel("   [Space] play/pause  [→] step  [K] load  [J] save  [D] proximity  [B] bubbles  [T] stats  [S] screenshot"));
         return strip;
     }
 
@@ -385,7 +412,7 @@ public class AsyncRobotPanel extends JPanel {
         int n = ids.size();
         for (int i = 0; i < n; i++) {
             int  id           = ids.get(i);
-            long initialDelay = (long)((double) i / n * periodMs);
+            long initialDelay = periodMs + (long)((double) i / n * periodMs);
             ScheduledFuture<?> future = executor.scheduleAtFixedRate(
                     () -> tickRobot(id),
                     initialDelay, periodMs, TimeUnit.MILLISECONDS);
@@ -446,7 +473,7 @@ public class AsyncRobotPanel extends JPanel {
         if(rec != null) simLogger.record(rec);
 
         // Telemetry updated outside the lock — EDT reads are display-only
-        tickCounts.put(id, tickCounts.getOrDefault(id, 0L) + 1);
+        tickCounts.merge(id, 1L, Long::sum);
         lastActivatedMs.put(id, System.currentTimeMillis());
     }
 
@@ -464,7 +491,7 @@ public class AsyncRobotPanel extends JPanel {
                 TickRecord rec = e.getValue().executeTimeStep(dt, tick);
                 e.getValue().move(dt);
                 simLogger.record(rec);
-                tickCounts.put(e.getKey(), tickCounts.getOrDefault(e.getKey(), 0L) + 1);
+                tickCounts.merge(e.getKey(), 1L, Long::sum);
                 lastActivatedMs.put(e.getKey(), System.currentTimeMillis());
             }
         } catch(Exception e) {
@@ -502,12 +529,14 @@ public class AsyncRobotPanel extends JPanel {
         lock.readLock().lock();
         try {
             if (showProximity) drawProximity(g2);
+            if (showBubbles) drawBubbles(g2);
             drawEdges(g2);
             drawRobots(g2);
             if (showStats) drawStatsOverlay(g2);
         } finally { lock.readLock().unlock(); }
 
         drawLegend(g2);
+        if (showBubbles) drawBubbleLegend(g2);
     }
 
     private void drawProximity(Graphics2D g2) {
@@ -521,6 +550,82 @@ public class AsyncRobotPanel extends JPanel {
             g2.setColor(new Color(100, 100, 220, 100));
             g2.draw(new Ellipse2D.Double(x - d, y - d, d * 2, d * 2));
         }
+    }
+
+    /**
+     * Draws each robot's physical bubble, coloured by how close its nearest neighbour is:
+     * green when clear, amber when within one tick of travel of contact, red on an actual
+     * overlap. The dashed keep-out ring is drawn for the selected robot only — at n=100,
+     * drawing it for everyone is unreadable.
+     *
+     * <p>A red bubble anywhere means the hard guard has been violated, which should be
+     * impossible once a run is under way. The shipped dataset does start with one
+     * overlapping pair, which should clear within a few seconds and never return.
+     */
+    private void drawBubbles(Graphics2D g2) {
+        final double r       = GeometricCycleLatticeRobot.BODY_RADIUS;
+        final double keepOut = GeometricCycleLatticeRobot.KEEP_OUT;
+        final double warn    = keepOut + GeometricCycleLatticeRobot.tickTravel();
+
+        g2.setStroke(new BasicStroke(1f));
+        for (GeometricCycleLatticeRobot a : robots.values()) {
+            double nearest = nearestNeighborDistance(a);
+
+            Color fill, edge;
+            if (nearest <= keepOut) {
+                fill = BUBBLE_OVER_FILL;  edge = BUBBLE_OVER_EDGE;
+            } else if (nearest < warn) {
+                fill = BUBBLE_NEAR_FILL;  edge = BUBBLE_NEAR_EDGE;
+            } else {
+                fill = BUBBLE_CLEAR_FILL; edge = BUBBLE_CLEAR_EDGE;
+            }
+
+            double x = a.getPosition().x;
+            double y = a.getPosition().y;
+            g2.setColor(fill);
+            g2.fill(new Ellipse2D.Double(x - r, y - r, r * 2, r * 2));
+            g2.setColor(edge);
+            g2.draw(new Ellipse2D.Double(x - r, y - r, r * 2, r * 2));
+        }
+
+        if (selectedRobot != null) {
+            double x = selectedRobot.getPosition().x;
+            double y = selectedRobot.getPosition().y;
+            g2.setStroke(new BasicStroke(1.2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
+                    10f, new float[] { 6f, 5f }, 0f));
+            g2.setColor(KEEP_OUT_RING);
+            g2.draw(new Ellipse2D.Double(x - keepOut, y - keepOut, keepOut * 2, keepOut * 2));
+            g2.setStroke(new BasicStroke(1f));
+        }
+    }
+
+    /** Distance from {@code robot} to its closest peer, or +inf if it is alone. */
+    private double nearestNeighborDistance(GeometricCycleLatticeRobot robot) {
+        double nearest = Double.POSITIVE_INFINITY;
+        for (GeometricCycleLatticeRobot other : robots.values()) {
+            if (robot.getRobotId() == other.getRobotId()) continue;
+            nearest = Math.min(nearest, robot.getPosition().distance(other.getPosition()));
+        }
+        return nearest;
+    }
+
+    /**
+     * Pairs currently closer than {@code KEEP_OUT}. The acceptance criterion for the hard
+     * guard, reduced to one number: it should reach zero shortly after a run starts and
+     * stay there.
+     */
+    private int countOverlappingPairs() {
+        List<GeometricCycleLatticeRobot> all = new ArrayList<>(robots.values());
+        int overlaps = 0;
+        for (int i = 0; i < all.size(); i++) {
+            for (int j = i + 1; j < all.size(); j++) {
+                if (all.get(i).getPosition().distance(all.get(j).getPosition())
+                        <= GeometricCycleLatticeRobot.KEEP_OUT) {
+                    overlaps++;
+                }
+            }
+        }
+        return overlaps;
     }
 
     private void drawEdges(Graphics2D g2) {
@@ -570,10 +675,15 @@ public class AsyncRobotPanel extends JPanel {
         long now     = System.currentTimeMillis();
         long elapsed = simStarted ? (now - simStartWallMs) : 0;
 
+        int overlaps = countOverlappingPairs();
+
         g2.setColor(Color.WHITE);
         g2.setFont(new Font("Monospaced", Font.BOLD, 10));
         g2.drawString(String.format("t=%.1fs  n=%d  period=%dms",
                 elapsed / 1000.0, robots.size(), periodMs), x + pad, y + rowH);
+        // Red whenever any pair is inside KEEP_OUT -- the hard guard's acceptance criterion.
+        g2.setColor(overlaps == 0 ? new Color(140, 220, 160) : new Color(255, 110, 90));
+        g2.drawString(String.format("overlaps: %d", overlaps), x + pad + 200, y + rowH);
 
         int row = y + rowH + pad;
         g2.setFont(new Font("Monospaced", Font.BOLD, 9));
@@ -620,6 +730,82 @@ public class AsyncRobotPanel extends JPanel {
             g2.drawString(e.getKey().name(), x + 14, ry + 4);
             ry += rowH;
         }
+    }
+
+    /**
+     * Explains the bubble overlay, shown only while that overlay is on and sitting
+     * directly under the role legend.
+     *
+     * <p>Every threshold is formatted from the live constants rather than written out, so
+     * retuning {@code BODY_RADIUS} cannot leave the legend quietly lying about what the
+     * colours mean. The swatches use the same shared colours the bubbles are drawn with,
+     * for the same reason.
+     */
+    private void drawBubbleLegend(Graphics2D g2) {
+        final double body    = GeometricCycleLatticeRobot.BODY_RADIUS;
+        final double keepOut = GeometricCycleLatticeRobot.KEEP_OUT;
+        final double warn    = keepOut + GeometricCycleLatticeRobot.tickTravel();
+
+        final int w = 172, rowH = 15, pad = 6, titleH = 13;
+        int roleLegendH = ROLE_COLORS.size() * rowH + 4 * 2;
+        // Right edge flush with the role legend above (which ends at getWidth() - 11),
+        // and stacked directly beneath it.
+        int x = getWidth() - 11 + pad - w;
+        int y = 10 + roleLegendH + 8;
+        int h = titleH + rowH * 4 + titleH + pad * 2;
+
+        g2.setColor(new Color(0, 0, 0, 150));
+        g2.fillRoundRect(x - pad, y, w, h, 8, 8);
+
+        g2.setFont(new Font("SansSerif", Font.BOLD, 9));
+        g2.setColor(new Color(170, 195, 215));
+        g2.drawString("BODY CLEARANCE", x, y + pad + 8);
+
+        g2.setFont(new Font("SansSerif", Font.PLAIN, 9));
+        int ry = y + pad + titleH + rowH - 3;
+        ry = bubbleLegendRow(g2, x, ry, rowH, BUBBLE_CLEAR_FILL, BUBBLE_CLEAR_EDGE, false,
+                String.format("clear (%.0f+)", warn));
+        ry = bubbleLegendRow(g2, x, ry, rowH, BUBBLE_NEAR_FILL, BUBBLE_NEAR_EDGE, false,
+                String.format("one tick away (%.0f-%.0f)", keepOut, warn));
+        ry = bubbleLegendRow(g2, x, ry, rowH, BUBBLE_OVER_FILL, BUBBLE_OVER_EDGE, false,
+                String.format("OVERLAP (≤%.0f)", keepOut));
+        ry = bubbleLegendRow(g2, x, ry, rowH, null, KEEP_OUT_RING, true,
+                "keep-out, selected");
+
+        // Spells out what the two radii actually are, because the dashed ring is not a
+        // bigger body -- it marks where another robot's CENTRE sits at first contact.
+        g2.setColor(new Color(150, 158, 170));
+        g2.drawString(String.format("body r %.0f  ·  keep-out %.0f", body, keepOut), x, ry + 2);
+    }
+
+    /** One swatch-and-label row of the bubble legend. Returns the next row's baseline. */
+    private int bubbleLegendRow(Graphics2D g2, int x, int ry, int rowH,
+                                Color fill, Color edge, boolean dashed, String label) {
+        final int d = 11;
+        int cy = ry - 8;
+
+        // White chip behind the swatch: the bubble fills are deliberately low-alpha so
+        // they can overlap on the canvas, and would be invisible on this dark panel.
+        // Drawing them over white shows exactly what they look like in the simulation.
+        g2.setColor(Color.WHITE);
+        g2.fillRect(x - 1, cy - 1, d + 3, d + 3);
+
+        Ellipse2D.Double swatch = new Ellipse2D.Double(x, cy, d, d);
+        if (fill != null) {
+            g2.setColor(fill);
+            g2.fill(swatch);
+        }
+        g2.setStroke(dashed
+                ? new BasicStroke(1.2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
+                        10f, new float[] { 3f, 2.5f }, 0f)
+                : new BasicStroke(1f));
+        g2.setColor(edge);
+        g2.draw(swatch);
+        g2.setStroke(new BasicStroke(1f));
+
+        g2.setColor(Color.WHITE);
+        g2.drawString(label, x + d + 7, ry);
+        return ry + rowH;
     }
 
     // ------------------------------------------------------------------
