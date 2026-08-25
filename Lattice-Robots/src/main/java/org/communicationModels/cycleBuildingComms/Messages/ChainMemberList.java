@@ -2,11 +2,17 @@ package org.communicationModels.cycleBuildingComms.Messages;
 
 import java.util.ArrayList;
 
+import org.graphs.util.RigidBodyTransformation;
+
 public class ChainMemberList {
     private ArrayList<Integer> chainList;
+    private int hops;
+    private RigidBodyTransformation measuredVoltage;
 
     public ChainMemberList() {
         chainList = new ArrayList<>();
+        this.hops = 0;
+        this.measuredVoltage = RigidBodyTransformation.identity();
     }
 
     public ChainMemberList(int robotId) {
@@ -17,6 +23,14 @@ public class ChainMemberList {
     public ChainMemberList(ChainMemberList list, int robotId) {
         this.chainList = new ArrayList<>(list.chainList);
         this.chainList.add(robotId);
+    }
+
+    public int getHops() {
+        return hops;
+    }
+
+    public RigidBodyTransformation getMeasuredVoltage() {
+        return measuredVoltage;
     }
 
     public int getRootID() {

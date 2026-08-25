@@ -20,6 +20,7 @@ public final class VoltageGraph {
     private final Map<Role, List<HalfEdge>> outgoing;
     private final List<Face> faces;
     private final Role primaryRole;
+    private final int maxCycleLength;
 
     VoltageGraph(List<Role> roles, Map<Integer, HalfEdge> halfEdgesById,
                  Map<Role, List<HalfEdge>> outgoing, List<Face> faces, Role primaryRole) {
@@ -28,6 +29,14 @@ public final class VoltageGraph {
         this.outgoing = outgoing;
         this.faces = faces;
         this.primaryRole = primaryRole;
+
+        // Cached rather than derived per call: faces are fixed at build time, and Phase
+        // 5's hop cap consults this on every relay.
+        int longest = 0;
+        for (Face face : faces) {
+            longest = Math.max(longest, face.getCycleLength());
+        }
+        this.maxCycleLength = longest;
     }
 
     public List<Role> getRoles() {
@@ -78,16 +87,66 @@ public final class VoltageGraph {
         for (HalfEdge h : walk) {
             holonomy = holonomy.compose(h.getVoltage());
         }
+        return holonomy.isApproximatelyIdentity(epsilon) && isFaceCycleLength(walk.size());
+    }
 
-        if (!holonomy.isApproximatelyIdentity(epsilon)) {
+    /**
+     * Checks a walk against separate translation and rotation tolerances, rather than
+     * the single conflated scalar {@link #validateCycle(List, double)} uses. See
+     * {@link RigidBodyTransformation#isApproximatelyIdentity(double, double)} for why
+     * one scalar cannot serve both.
+     *
+     * <p>Composition is left-to-right in walk order, matching the order a face
+     * certificate accumulates its hops as it travels. Reversing the walk generally does
+     * NOT yield the identity -- these transforms do not commute -- so a certificate that
+     * accumulates in the wrong order will fail here, which is the intended behaviour.
+     *
+     * @param walk the half-edges traversed, in order
+     * @param positionEpsilon translation tolerance in lattice units
+     * @param angleEpsilon rotation tolerance in radians
+     * @return true if the walk closes and its length matches some face's cycle length
+     */
+    public boolean validateCycle(List<HalfEdge> walk, double positionEpsilon, double angleEpsilon) {
+        if (walk.isEmpty()) {
             return false;
         }
 
+        RigidBodyTransformation holonomy = RigidBodyTransformation.identity();
+        for (HalfEdge h : walk) {
+            holonomy = holonomy.compose(h.getVoltage());
+        }
+
+        return holonomy.isApproximatelyIdentity(positionEpsilon, angleEpsilon)
+                && isFaceCycleLength(walk.size());
+    }
+
+    /**
+     * Whether any face in this graph is bounded by exactly this many half-edges. The
+     * length half of the closure test: a walk whose accumulated voltage returns to
+     * identity but whose length matches no face has wrapped some face more than once,
+     * or traced something that is not a face at all.
+     *
+     * @param length a candidate walk length
+     * @return true if some face has this cycle length
+     */
+    public boolean isFaceCycleLength(int length) {
         for (Face face : faces) {
-            if (face.getCycleLength() == walk.size()) {
+            if (face.getCycleLength() == length) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * The longest face boundary in this graph -- 12 on the dodecagonal lattices, 4 on
+     * the square. Bounds how far a face certificate may legitimately travel: a walk that
+     * has taken more hops than this cannot still be tracing a single face, so relayers
+     * use it to cut off a wandering certificate rather than forwarding it forever.
+     *
+     * @return the maximum cycle length over all faces
+     */
+    public int maxCycleLength() {
+        return maxCycleLength;
     }
 }
