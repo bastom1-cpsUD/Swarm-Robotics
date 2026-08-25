@@ -2,7 +2,7 @@ package org.communicationModels.cycleBuildingComms;
 
 import java.util.List;
 
-import org.communicationModels.cycleBuildingComms.Messages.ChainMemberList;
+import org.communicationModels.cycleBuildingComms.Messages.VoltageCertificate;
 import org.communicationModels.cycleBuildingComms.Messages.PositioningMessage;
 import org.graphs.util.OrientedPoint;
 import org.graphs.voltage.HalfEdge;
@@ -53,7 +53,7 @@ class AssignmentContentionTest {
         child.enqueueMessage(new PositioningMessage(
                 parent.getRobotId(), child.getRobotId(),
                 vertexId, edge.getId(), vertexId, edge.getId(),
-                new ChainMemberList(parent.getRobotId())));
+                new VoltageCertificate(parent.getRobotId())));
     }
 
     /**

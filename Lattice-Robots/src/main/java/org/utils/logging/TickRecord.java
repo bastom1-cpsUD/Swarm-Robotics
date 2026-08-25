@@ -46,6 +46,11 @@ public record TickRecord(
                 || !before.completedCycles().equals(after.completedCycles())
                 || !sameEdge(before.assignedEdge(), after.assignedEdge())
                 || !sameEdge(before.originEdge(), after.originEdge())
+                // A relay leaves everything else on this robot untouched -- same role, same
+                // edges, same pending child -- so without this a tick whose only effect was
+                // extending a certificate goes unlogged, which is exactly the tick the drift
+                // measurement needs to see.
+                || !java.util.Objects.equals(before.certificate(), after.certificate())
                 || !samePose(poseBefore, poseAfter)
                 || !sent.isEmpty();
     }

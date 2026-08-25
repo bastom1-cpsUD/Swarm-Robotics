@@ -11,7 +11,7 @@ import org.communicationModels.Observation;
 import org.communicationModels.TrustLevel;
 import org.communicationModels.cycleBuildingComms.Messages.AbstractMessage;
 import org.communicationModels.cycleBuildingComms.Messages.AttemptLaterMessage;
-import org.communicationModels.cycleBuildingComms.Messages.ChainMemberList;
+import org.communicationModels.cycleBuildingComms.Messages.VoltageCertificate;
 import org.communicationModels.cycleBuildingComms.Messages.PositioningMessage;
 import org.communicationModels.cycleBuildingComms.Messages.PromotionMessage;
 import org.communicationModels.cycleBuildingComms.Messages.RejectAssignmentMessage;
@@ -45,7 +45,25 @@ public class CyclebuilderComms extends CommunicationSystem {
     private int stableID;
     private int pendingChildID;
     private boolean hasBeenAssigned;
-    private ChainMemberList chainMemberList;
+    private VoltageCertificate certificate;
+
+    /**
+     * The robot that assigned this one its lattice site, and the frame every derived
+     * target is expressed against. {@code -1} when unassigned.
+     *
+     * <p>Introduced when {@link VoltageCertificate} stopped carrying a chain member list.
+     * The parent used to be read back out of that list as its last element, which coupled
+     * two unrelated things: <em>who anchors my pose</em> and <em>which walk am I relaying
+     * right now</em>. Those are the same robot today only because a robot serves one face
+     * at a time. Once it serves several, the certificate at hand belongs to whichever walk
+     * arrived most recently, and re-deriving the anchor from it would move the robot to a
+     * different lattice site every time a new face came through -- with no compile error
+     * and no test failure, just robots drifting onto wrong sites.
+     *
+     * <p>So this is set exactly once, on the transition into {@code cycleBuilder}, and
+     * never from a relayed message.
+     */
+    private int anchorParentID;
     private CycleRole role;
     private ArrayList<Integer> unableToDoAssignmentIDs;
 
@@ -79,7 +97,8 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.pendingChildID = -1;
         this.pendingChildEdge = null;
         this.hasBeenAssigned = false;
-        this.chainMemberList = new ChainMemberList();
+        this.certificate = null;
+        this.anchorParentID = -1;
         this.role = CycleRole.unassigned;
         this.completedCycles = new HashMap<>();
         this.self = self;
@@ -205,12 +224,15 @@ public class CyclebuilderComms extends CommunicationSystem {
                     setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
                     setOriginEdge(pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
                     unableToDoAssignmentIDs.add(pm.getSenderId());
-                    chainMemberList = pm.getChainList();
-                    self.addEdge(new Edge(self.getRobotId(), chainMemberList.getSenderID()));
+                    certificate = pm.getCertificate();
+                    // Set here and nowhere else: this is the only transition that decides
+                    // which robot this one is anchored to. See the anchorParentID javadoc.
+                    anchorParentID = pm.getSenderId();
+                    self.addEdge(new Edge(self.getRobotId(), anchorParentID));
                     log("-> became cycleBuilder: edge id=" + getAssignedEdge().getId()
                             + " from vertex " + getAssignedEdge().getOrigin().getId()
-                            + ", root=" + chainMemberList.getRootID()
-                            + ", chain=" + chainMemberList.getIDList());
+                            + ", parent=" + anchorParentID
+                            + ", cert=" + certificate);
                     return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED)";
                 } else if(next instanceof PromotionMessage pm) {
                     resetToRoot();
@@ -270,33 +292,35 @@ public class CyclebuilderComms extends CommunicationSystem {
                         }
 
                         //Check chain list to see who's list is larger, and if the incoming message has a larger list, we should accept it and send rejection to current parent with retryable
-                        if(pm.getChainList().size() > chainMemberList.size()) {
+                        if(pm.getCertificate().getHops() > certificate.getHops()) {
                             forwardRejectionToParent(true);
                             resetToCycleBuilder();
                             setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
                             setOriginEdge(pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
                             unableToDoAssignmentIDs.add(pm.getSenderId());
-                            chainMemberList = pm.getChainList();
+                            certificate = pm.getCertificate();
+                            anchorParentID = pm.getSenderId();
                             log("-> Positioning Message from " + pm.getSenderId() + "(ACCEPTED, incoming chain list is larger)");
                             return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED, incoming chain list is larger)";
 
                         //If incoming list is smaller, we should wait for other to complete our task as it will override
-                        } else if(pm.getChainList().size() < chainMemberList.size()) {
+                        } else if(pm.getCertificate().getHops() < certificate.getHops()) {
                             //If a root sent the message, we should tell the root that we are rejecting the assignment and that it is retryable so that the root can reassign us
-                            if(pm.getChainList().getRootID() == pm.getSenderId()) {
+                            if(pm.getCertificate().getInitiatorID() == pm.getSenderId()) {
                                 forwardRejectionUpstream(pm, true);
                             }
                             log("-> Positioning Message from " + pm.getSenderId() + "(REJECTED, incoming chain list is smaller)");
                             return "Positioning Message from " + pm.getSenderId() + "(REJECTED, incoming chain list is smaller)";
                         } else {
                             //Accept message if root is smaller
-                            if(pm.getChainList().getRootID() < chainMemberList.getRootID()) {
+                            if(pm.getCertificate().getInitiatorID() < certificate.getInitiatorID()) {
                                 forwardRejectionToParent(true);
                                 resetToCycleBuilder();
                                 setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
                                 setOriginEdge(pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
                                 unableToDoAssignmentIDs.add(pm.getSenderId());
-                                chainMemberList = pm.getChainList();
+                                certificate = pm.getCertificate();
+                                anchorParentID = pm.getSenderId();
                                 log("-> Positioning Message from " + pm.getSenderId() + "(ACCEPTED, incoming root ID is smaller");
                                 return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED, incoming root ID is smaller)";
                             
@@ -356,11 +380,11 @@ public class CyclebuilderComms extends CommunicationSystem {
                         return "Positioning Message from " + pm.getSenderId() + " (REJECTED, WILL BREAK FORMATION)";
 
                         //If a root sent the message, check if the next edge's cycle is complete
-                    } else if(pm.getChainList().getRootID() == pm.getSenderId()){
+                    } else if(pm.getCertificate().getInitiatorID() == pm.getSenderId()){
                         HalfEdge nextEdge = inferNextEdge(getAssignedEdgeFromMessage(pm));
 
                         if(completedCycles.get(nextEdge.getId()) == CycleStatus.complete) {
-                            forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
+                            forwardSuccessUpstream(pm.getSenderId(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID(), pm.getCertificate());
                             log("-> root received message from another root, but next edge's cycle is complete, forwarding SUCCESS upstream");
                             return "Positioning Message from " + pm.getSenderId() + " (ACCEPTED, CYCLE COMPLETE, forwarding SUCCESS upstream)";
                         } else if(!hasFailed()) {
@@ -383,7 +407,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                             setCycleStatusOf(outgoingEquivelentID, CycleStatus.unattempted);
                         }
                         self.addEdge(new Edge(pm.getRecipient(), pm.getSenderId()));
-                    forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
+                    forwardSuccessUpstream(pm.getSenderId(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID(), pm.getCertificate());
                     return "Positioning Message from " + pm.getSenderId() + " (ACCEPTED)";
                     }
                 } else if(next instanceof PromotionMessage pm) {
@@ -409,7 +433,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                         return "Positioning Message from " + pm.getSenderId() + "(REJECTED)";
                     } else {
                         log("-> reached stable, reporting SUCCESS, forwarding upstream");
-                        forwardSuccessUpstream(pm.getChainList().getSenderID(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
+                        forwardSuccessUpstream(pm.getSenderId(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID(), pm.getCertificate());
                         return "Positioning Message from " + pm.getSenderId() + "(ACCEPTED)";
                     }
                 } else {
@@ -467,9 +491,9 @@ public class CyclebuilderComms extends CommunicationSystem {
 
                 // 2. Cycle does not exist. Build it!
                 GeometricCycleLatticeRobot childToBuild = findBestNeighborForEdge(targetEdge);
-                ChainMemberList chainList = new ChainMemberList(self.getRobotId());
+                VoltageCertificate certificate = new VoltageCertificate(self.getRobotId());
                 if (childToBuild != null) {
-                    PositioningMessage pm = new PositioningMessage(self.getRobotId(), childToBuild.getRobotId(), getVertexIDof(targetEdge), getEdgeIDof(targetEdge), getVertexIDof(targetEdge), getEdgeIDof(targetEdge), chainList);
+                    PositioningMessage pm = new PositioningMessage(self.getRobotId(), childToBuild.getRobotId(), getVertexIDof(targetEdge), getEdgeIDof(targetEdge), getVertexIDof(targetEdge), getEdgeIDof(targetEdge), certificate);
                     send(childToBuild, pm);
                     pendingChildEdge = new Edge(self.getRobotId(), childToBuild.getRobotId());
                     self.addEdge(pendingChildEdge);
@@ -508,8 +532,25 @@ public class CyclebuilderComms extends CommunicationSystem {
                 } 
                 //ADD BACK HERE
                 log("-> assigning robot " + child.getRobotId() + " to edge " + targetEdge.getId());
-                ChainMemberList childChainList = new ChainMemberList(chainMemberList, self.getRobotId());
-                PositioningMessage pm = new PositioningMessage(self.getRobotId(), child.getRobotId(), getVertexIDof(targetEdge), getEdgeIDof(targetEdge), originVertexID, originOutgoingEdgeID, childChainList);
+
+                // Extend the certificate by the hop INTO this robot -- T(parent -> me), not
+                // T(me -> child). The child has not moved yet, so measuring outbound would
+                // sample a pose that does not exist. Both endpoints of the inbound hop are
+                // settled: the parent relayed earlier, and the alreadyInPosition gate above
+                // means this robot is on its own site now.
+                RigidBodyTransformation inboundHop = measureInboundHop(anchorParentID);
+                if(inboundHop == null) {
+                    // The parent is one lattice edge away and parked, so it is meant to be
+                    // permanently in range (FaceClosureTest pins every edge below COMM_RANGE).
+                    // Losing sight of it means the certificate cannot be extended honestly,
+                    // and a certificate extended with a guessed hop certifies nothing. Hold
+                    // the obligation and retry next tick rather than relaying a lie; Phase 5
+                    // turns a persistent loss into a report the initiator can act on.
+                    log("-> parent " + anchorParentID + " not observable, cannot extend certificate this tick");
+                    return "N/A (Parent " + anchorParentID + " unobservable, certificate not extended)";
+                }
+                VoltageCertificate childCertificate = certificate.extend(inboundHop);
+                PositioningMessage pm = new PositioningMessage(self.getRobotId(), child.getRobotId(), getVertexIDof(targetEdge), getEdgeIDof(targetEdge), originVertexID, originOutgoingEdgeID, childCertificate);
                 send(child, pm);
                 pendingChildEdge = new Edge(self.getRobotId(), child.getRobotId());
                 self.addEdge(pendingChildEdge);
@@ -637,10 +678,10 @@ public class CyclebuilderComms extends CommunicationSystem {
      * and the parent may have drifted out of observation range.
      */
     private OrientedPoint getParentPoseOrNull() {
-        if (role != CycleRole.cycleBuilder || chainMemberList == null || chainMemberList.isEmpty()) {
+        if (role != CycleRole.cycleBuilder || certificate == null) {
             return null;
         }
-        GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
+        GeometricCycleLatticeRobot parent = getNeighborByID(anchorParentID);
         return parent == null ? null : parent.getPosition();
     }
 
@@ -921,7 +962,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         // Not retryable: this robot genuinely cannot take this spot, so the parent should
         // record that and offer the edge to a different candidate rather than re-offering
         // it here. forwardRejectionToParent must run first -- resetToUnassigned clears the
-        // chainMemberList it reads the parent from.
+        // certificate it reads the parent from.
         forwardRejectionToParent(false);
         resetToUnassigned();
         hasBeenAssigned = false;
@@ -936,13 +977,20 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     //MESSAGE-PROCESSING UTIL
     private void forwardSuccessUpstream() {
-        forwardSuccessUpstream(chainMemberList.getSenderID(), originVertexID, assignedOutgoingEdgeID);
+        forwardSuccessUpstream(anchorParentID, originVertexID, assignedOutgoingEdgeID, certificate);
         resetToUnassigned();
     }
 
-    private void forwardSuccessUpstream(int parentId, int originVertexID, int originEdgeID) {
+    /**
+     * Reports success to a parent, handing the certificate back with it.
+     *
+     * <p>The certificate rides the return path rather than being kept: whoever made the
+     * offer gets back the exact certificate it sent, so it can act on the outcome without
+     * ever having held a copy while the walk was in flight.
+     */
+    private void forwardSuccessUpstream(int parentId, int originVertexID, int originEdgeID, VoltageCertificate returning) {
         GeometricCycleLatticeRobot parent = getNeighborByID(parentId);
-        StatusMessage sm = new StatusMessage(self.getRobotId(), parentId, true, originVertexID, originEdgeID);
+        StatusMessage sm = new StatusMessage(self.getRobotId(), parentId, true, originVertexID, originEdgeID, returning);
         send(parent, sm);
     }
 
@@ -956,10 +1004,10 @@ public class CyclebuilderComms extends CommunicationSystem {
      * undeliverable report is no reason to stay a wedged cycleBuilder.
      */
     private void forwardFailureUpstream() {
-        GeometricCycleLatticeRobot parent = chainMemberList.isEmpty()
-                ? null : getNeighborByID(chainMemberList.getSenderID());
+        GeometricCycleLatticeRobot parent = certificate == null
+                ? null : getNeighborByID(anchorParentID);
         if (parent != null) {
-            StatusMessage sm = new StatusMessage(self.getRobotId(), parent.getRobotId(), false, originVertexID, originOutgoingEdgeID);
+            StatusMessage sm = new StatusMessage(self.getRobotId(), parent.getRobotId(), false, originVertexID, originOutgoingEdgeID, certificate);
             send(parent, sm);
         } else {
             log("-> cannot report failure: parent unreachable, standing down anyway");
@@ -972,12 +1020,12 @@ public class CyclebuilderComms extends CommunicationSystem {
         int originVertexID = pm.getOriginVertexID();
         int originOutgoingEdgeID = pm.getOriginOutgoingEdgeID();
 
-        StatusMessage sm = new StatusMessage(self.getRobotId(), parent.getRobotId(), false, originVertexID, originOutgoingEdgeID);
+        StatusMessage sm = new StatusMessage(self.getRobotId(), parent.getRobotId(), false, originVertexID, originOutgoingEdgeID, pm.getCertificate());
         send(parent, sm);
     }
 
     private void forwardRejectionUpstream(PositioningMessage pm, boolean isRetryable) {
-        RejectAssignmentMessage rm = new RejectAssignmentMessage(pm.getRecipient(), pm.getSenderId(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID(), isRetryable);
+        RejectAssignmentMessage rm = new RejectAssignmentMessage(pm.getRecipient(), pm.getSenderId(), pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID(), isRetryable, pm.getCertificate());
         GeometricCycleLatticeRobot robot = getNeighborByID(pm.getSenderId());
         if(!(robot == null)) send(robot, rm);
     }
@@ -991,13 +1039,13 @@ public class CyclebuilderComms extends CommunicationSystem {
      * the {@code childHasLeft} check in {@link #makeObservations()}.
      */
     private void forwardRejectionToParent(boolean isRetryable) {
-        GeometricCycleLatticeRobot parent = chainMemberList.isEmpty()
-                ? null : getNeighborByID(chainMemberList.getSenderID());
+        GeometricCycleLatticeRobot parent = certificate == null
+                ? null : getNeighborByID(anchorParentID);
         if (parent == null) {
             log("-> cannot reject to parent: unreachable");
             return;
         }
-        RejectAssignmentMessage rm = new RejectAssignmentMessage(self.getRobotId(), parent.getRobotId(), originVertexID, originOutgoingEdgeID, isRetryable);
+        RejectAssignmentMessage rm = new RejectAssignmentMessage(self.getRobotId(), parent.getRobotId(), originVertexID, originOutgoingEdgeID, isRetryable, certificate);
         send(parent, rm);
     }
 
@@ -1074,21 +1122,21 @@ public class CyclebuilderComms extends CommunicationSystem {
     /**
      * Whether the given robot is the root of this robot's current chain. Guards the
      * empty-chain case, which a cycleBuilder holds briefly between resetToCycleBuilder()
-     * and the caller's own chainMemberList assignment, and which an unassigned robot
+     * and the caller's own certificate assignment, and which an unassigned robot
      * holds permanently.
      *
      * @param robotID the id to test
      * @return true if the chain is non-empty and this id is its root
      */
     private boolean isChainRoot(int robotID) {
-        return !chainMemberList.isEmpty() && chainMemberList.getRootID() == robotID;
+        return certificate != null && certificate.getInitiatorID() == robotID;
     }
 
     private GeometricCycleLatticeRobot findBestNeighborForEdge(HalfEdge targetEdge) {
         OrientedPoint targetLocal  = getTargetInLocalCoordinates(targetEdge);
             log("Beginning decision process");
 
-        int rootID = chainMemberList.isEmpty() ? -1 : chainMemberList.getRootID();
+        int rootID = certificate == null ? -1 : certificate.getInitiatorID();
 
         // Root is only a candidate if it's not banned/parent, and check it separately from the rest
         Observation rootObs = observations.get(rootID);
@@ -1110,7 +1158,33 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         for (Observation obs : observations.values()) {
             int robotID = obs.getId();
-            if (robotID != rootID && !chainMemberList.isInList(robotID) && !unableToDoAssignmentIDs.contains(robotID)) {
+            // Walk-membership exclusion, narrowed. This used to read
+            // !certificate.isInList(robotID), excluding every robot already on the walk;
+            // the certificate no longer carries that roster, so what remains is the
+            // initiator (rootID, above) and the immediate parent. The parent is in
+            // unableToDoAssignmentIDs already -- it is banned on accept -- so the explicit
+            // test below is belt-and-braces rather than new coverage.
+            //
+            // What is no longer excluded is deeper ancestors: a builder can offer the next
+            // edge to its own grandparent. That is self-correcting by design -- an ancestor
+            // is parked a full lattice site away from the offered target, so
+            // checkAssignmentForCurrentPosition fails by ~50 units against a tolerance of
+            // 0.1, it rejects NON-retryable, that lands it on this face's ban list, and the
+            // certificate rides back on the rejection so the offer moves straight to the
+            // next candidate. One wasted round trip per ancestor per face, and it cannot
+            // repeat.
+            //
+            // INTERIM HAZARD, until pendingChildID is replaced by obligations: the gate at
+            // the top of processMessages rotates a PositioningMessage unread whenever the
+            // recipient has a pending child, so a mid-chain ancestor never reaches the
+            // position check above and never sends that rejection. Offerer, ancestor and the
+            // robot between them then wait on each other with no timeout. Requires the
+            // grandparent to be within COMM_RANGE (75), which means a 4-cycle of 50-unit
+            // edges -- OctagonSquare, HexagonSquareTriangle, DodecagonHexagonSquare,
+            // ElongatedTriangular. SnubSquare and Square are 70 (99 apart, out of range);
+            // on triangular faces the grandparent IS the initiator, excluded just below.
+            // Deleting the gate closes this.
+            if (robotID != rootID && robotID != anchorParentID && !unableToDoAssignmentIDs.contains(robotID)) {
                 // A neighbor already sitting exactly at the target position must win outright,
                 // same as the root case above, and before the wedge test runs: that test's
                 // angle math is ill-conditioned right at zero distance (the target->candidate
@@ -1336,12 +1410,34 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         if (assignedEdge == null) return null;
 
-        GeometricCycleLatticeRobot parent = getNeighborByID(chainMemberList.getSenderID());
+        GeometricCycleLatticeRobot parent = getNeighborByID(anchorParentID);
         if (parent == null) return null;
 
         return globalTransformOf(parent.getPosition(), assignedEdge.getVoltage())
                 .asPose();
     }
+
+    /**
+     * The transform from a parent's live pose into this robot's own frame -- the single
+     * measured hop a relaying robot contributes to a certificate.
+     *
+     * <p>{@code Observation.getLocalPosition()} is the parent expressed in this robot's
+     * frame, which is {@code T(me -> parent)}; the hop wanted is its inverse. Measured
+     * rather than looked up: the ideal voltage is identity-by-construction around a face
+     * and would certify nothing.
+     *
+     * @param parentId the robot that relayed to this one
+     * @return {@code T(parent -> me)}, or null if the parent is not currently observable
+     */
+    private RigidBodyTransformation measureInboundHop(int parentId) {
+        Observation parentObservation = observations.get(parentId);
+        if (parentObservation == null) {
+            return null;
+        }
+        return new RigidBodyTransformation(parentObservation.getLocalPosition()).inverse();
+    }
+
+
 
     private OrientedPoint getAssignedLocalPosition() {
         OrientedPoint globalPos = getAssignedGlobalPosition();
@@ -1387,7 +1483,8 @@ public class CyclebuilderComms extends CommunicationSystem {
     public void reset() {
         this.pendingChildID = -1;
         this.pendingChildEdge = null;
-        this.chainMemberList = new ChainMemberList();
+        this.certificate = null;
+        this.anchorParentID = -1;
         this.role = CycleRole.unassigned;
         unableToDoAssignmentIDs.clear();
 
@@ -1405,7 +1502,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     /**
-     * Clean slate for "unassigned": stableID, pendingChildID, chainMemberList,
+     * Clean slate for "unassigned": stableID, pendingChildID, certificate,
      * unableToDoAssignmentIDs, and the assigned/origin edge references are all
      * cleared, and role is set to unassigned. hasBeenAssigned is the one
      * state-data field deliberately left untouched. Differs from the existing
@@ -1418,7 +1515,8 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.stableID = -1;
         this.pendingChildID = -1;
         this.pendingChildEdge = null;
-        this.chainMemberList = new ChainMemberList();
+        this.certificate = null;
+        this.anchorParentID = -1;
         this.role = CycleRole.unassigned;
         this.unableToDoAssignmentIDs.clear();
 
@@ -1430,11 +1528,11 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     /**
-     * Clean slate for "cycleBuilder": stableID, pendingChildID, chainMemberList,
+     * Clean slate for "cycleBuilder": stableID, pendingChildID, certificate,
      * unableToDoAssignmentIDs, and both the assigned and origin edge references
      * are cleared, and role is set to cycleBuilder. Meant to be immediately
      * followed by setAssignedEdge/setOriginEdge and the caller's own
-     * chainMemberList/unableToDoAssignmentIDs setup, the same way the
+     * certificate/unableToDoAssignmentIDs setup, the same way the
      * unassigned -> cycleBuilder PositioningMessage handling does today.
      */
     public void resetToCycleBuilder() {
@@ -1449,7 +1547,8 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.pendingChildID = -1;
         this.pendingChildEdge = null;
         this.hasBeenAssigned = true;
-        this.chainMemberList = new ChainMemberList();
+        this.certificate = null;
+        this.anchorParentID = -1;
         this.role = CycleRole.cycleBuilder;
         this.unableToDoAssignmentIDs.clear();
 
@@ -1462,7 +1561,7 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     /**
      * Clean slate for a root moving on to its next outgoing edge: pendingChildID,
-     * chainMemberList, unableToDoAssignmentIDs, and the origin edge reference are
+     * certificate, unableToDoAssignmentIDs, and the origin edge reference are
      * cleared, role is (re-)set to root, and hasFailed is forced back to false.
      * stableID and the assigned edge are deliberately left untouched -- they're
      * the root's own identity/position in the graph, not per-edge state. Same
@@ -1477,7 +1576,8 @@ public class CyclebuilderComms extends CommunicationSystem {
         policy.cancelEvasion();
         this.pendingChildID = -1;
         this.pendingChildEdge = null;
-        this.chainMemberList = new ChainMemberList();
+        this.certificate = null;
+        this.anchorParentID = -1;
         this.role = CycleRole.root;
         this.unableToDoAssignmentIDs.clear();
 
@@ -1517,7 +1617,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                 hasFailed(),
                 pendingChildID,
                 stableID,
-                chainMemberList,
+                certificate,
                 getAssignedEdge(),
                 getOriginEdge(),
                 Map.copyOf(completedCycles),

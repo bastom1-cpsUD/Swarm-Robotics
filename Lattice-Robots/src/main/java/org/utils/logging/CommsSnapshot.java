@@ -6,7 +6,7 @@ import org.communicationModels.cycleBuildingComms.CycleRole;
 import org.communicationModels.cycleBuildingComms.CycleStatus;
 import org.communicationModels.cycleBuildingComms.CyclebuilderComms;
 import org.communicationModels.cycleBuildingComms.Messages.AbstractMessage;
-import org.communicationModels.cycleBuildingComms.Messages.ChainMemberList;
+import org.communicationModels.cycleBuildingComms.Messages.VoltageCertificate;
 import org.graphs.voltage.HalfEdge;
 
 import java.util.List;
@@ -32,7 +32,7 @@ public record CommsSnapshot(
         boolean hasFailed,
         int pendingChildID,
         int stableID,
-        ChainMemberList chainMemberList,
+        VoltageCertificate certificate,
         HalfEdge assignedEdge,
         HalfEdge originEdge,
         Map<Integer, CycleStatus> completedCycles,
