@@ -53,42 +53,6 @@ public final class MathUtils {
     public static final double REASSIGNMENT_ANGLE_EPSILON = 1e-1;
 
     /**
-     * Linear tolerance, in lattice units, for accepting a face certificate's accumulated
-     * transform as closed. Compared against the translation magnitude by
-     * {@link org.graphs.util.RigidBodyTransformation#isApproximatelyIdentity(double, double)}.
-     *
-     * <p><strong>Provisional. This number has not been measured.</strong> It cannot be
-     * derived on paper, because the drift it must admit depends on which path each hop of
-     * a walk took. A freshly assigned robot snaps exactly onto its derived target, so its
-     * hop contributes error on the order of {@link #EPSILON}. A robot accepted where it
-     * already stands goes through {@code checkAssignmentForCurrentPosition} at
-     * {@link #REASSIGNMENT_ANGLE_EPSILON}, roughly 100x looser, which levers to several
-     * lattice units over a 70-unit edge -- and that is the common case in a mature
-     * formation. A naive worst case over a 12-cycle exceeds an edge length, which would
-     * make any absolute bound useless; real drift is far smaller and partly cancels, but
-     * that is an empirical claim.
-     *
-     * <p>Set this from the logged distribution of closing products, not from a guess. If
-     * the measured spread turns out too wide to separate a real closure from a walk that
-     * landed on the wrong lattice site, the levers are to tighten
-     * {@link #REASSIGNMENT_ANGLE_EPSILON}, or to make the test relative -- accept when the
-     * closing error is small against the 50-70 unit distance to the nearest wrong site --
-     * rather than absolute.
-     */
-    public static final double CLOSURE_POSITION_EPSILON = 1.0;
-
-    /**
-     * Angular tolerance, in radians, for the same closure test. Provisional for the same
-     * reason as {@link #CLOSURE_POSITION_EPSILON}, but with a floor that is not arbitrary:
-     * a closure cannot meaningfully be demanded tighter than the tolerance at which an
-     * individual hop was admitted to the walk in the first place, so this starts at
-     * {@link #REASSIGNMENT_ANGLE_EPSILON} (~5.7 degrees) rather than below it. Tightening
-     * one without the other only produces closures that fail for a reason the walk was
-     * never checked against.
-     */
-    public static final double CLOSURE_ANGLE_EPSILON = REASSIGNMENT_ANGLE_EPSILON;
-
-    /**
      * Tolerance for treating three points as collinear in
      * {@link #threePointClockwiseCounterClockwiseTest}.
      *

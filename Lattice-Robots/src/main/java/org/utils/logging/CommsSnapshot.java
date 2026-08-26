@@ -5,6 +5,7 @@ import org.communicationModels.TrustLevel;
 import org.communicationModels.cycleBuildingComms.CycleRole;
 import org.communicationModels.cycleBuildingComms.CycleStatus;
 import org.communicationModels.cycleBuildingComms.CyclebuilderComms;
+import org.communicationModels.cycleBuildingComms.FaceObligation;
 import org.communicationModels.cycleBuildingComms.Messages.AbstractMessage;
 import org.communicationModels.cycleBuildingComms.Messages.VoltageCertificate;
 import org.graphs.voltage.HalfEdge;
@@ -38,7 +39,20 @@ public record CommsSnapshot(
         Map<Integer, CycleStatus> completedCycles,
         List<AbstractMessage> queueInOrder,
         Map<Integer, Observation> observations,
-        List<Integer> unableToDoAssignmentIDs
+        /**
+         * The communication tuples this robot holds -- who assigned it each face, which
+         * edge it owes onward, who it has offered that edge to, and who has declined.
+         *
+         * <p>Replaces the flat {@code unableToDoAssignmentIDs} list that used to sit here.
+         * Those exclusions were robot-scoped and so said nothing about <em>which</em> face
+         * a robot had been ruled out of; they are now per-obligation, readable via
+         * {@link FaceObligation#getBans()}.
+         *
+         * <p>{@link #pendingChildID()} above stays as a derived convenience for the frame
+         * view and the tick diff, but anything new should read this instead -- it is the
+         * only one of the two that still means something once a robot serves several faces.
+         */
+        List<FaceObligation> obligations
 ) {
 
     /**

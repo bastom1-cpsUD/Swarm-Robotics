@@ -16,25 +16,39 @@ import org.graphs.util.RigidBodyTransformation;
  * with the face. What the certificate carries is fixed-size regardless of how far it has
  * travelled.
  *
- * <p><strong>Measured, not ideal.</strong> Composing the graph's own voltages would prove
- * nothing: {@code VoltageGraphBuilder.build()} already throws unless every face's ideal
- * holonomy converges to identity, so that product is identity by construction. The content
- * lives in realized geometry -- each hop is the transform from the parent's <em>live</em>
- * pose to this robot's live pose, so accumulated placement error is what the initiator
- * ends up testing.
+ * <p><strong>Closure is decided by identity and length, not by geometry.</strong> A
+ * certificate closes a face when it comes back to the robot that minted it, having taken
+ * exactly {@code cycleLength} hops to do so. Those are the two discrete facts carried
+ * here, and they are sufficient.
  *
- * <p><strong>Each robot composes the hop INTO itself</strong> -- {@code T(parent -> me)}
- * -- at the moment it acts on the obligation, never {@code T(me -> child)}. The child has
- * not moved yet when it is selected, so measuring outbound samples a pose that does not
- * exist; and on a symmetric lattice that mistake still lands near identity often enough to
- * pass square and hexagon runs unnoticed. Composing inbound means both endpoints are
- * settled: the parent relayed earlier, so it was in position then, and this robot is in
- * position now.
+ * <p><strong>Why the accumulated transform decides nothing.</strong> Each relayer composes
+ * the hop into itself, {@code T(parent -> me) = P_{i-1}^-1 . P_i}, so a walk composes to
+ * <pre>  P_0^-1.P_1 . P_1^-1.P_2 . ... . P_{k-1}^-1.P_k  =  P_0^-1 . P_k</pre>
+ * -- every intermediate pose cancels -- and the initiator's own closing hop
+ * {@code P_k^-1 . P_0} makes the product <em>exactly</em> the identity. That holds for any
+ * poses whatsoever. It was measured, not assumed: displacing a robot 150 units off its
+ * lattice site leaves the closed product at 0.000000000000, and so does a walk over four
+ * arbitrary poses that form no face at all.
  *
- * <p>Arithmetic follows from that rule. The initiator sends {@code hops = 0} and an
- * identity product; each relayer adds one hop and one inbound transform; so a certificate
- * returning to its initiator carries {@code cycleLength - 1} hops, and the initiator
- * supplies the closing hop itself before testing.
+ * <p>Accumulating the per-hop residual against the ideal voltage does not rescue it. The
+ * measured walk is a closed loop, so its displacements sum to zero; the ideal walk closes
+ * by construction, so its voltages sum to zero; and while every shipped lattice declares
+ * its roles at orientation 0, every voltage is a pure translation and the difference of
+ * two zeros is zero. Nothing accumulated around a walk that physically returns to its
+ * starting robot can carry information -- the robot is where it is.
+ *
+ * <p><strong>So the transform is kept as a consistency invariant, not a tolerance test.</strong>
+ * At closure it should be exactly the identity. A non-identity product means the walk did
+ * not come back to the same physical robot, or that a robot moved mid-walk -- both
+ * genuinely anomalous, and both worth surfacing in the tick log. It is deliberately
+ * <em>not</em> gated on an epsilon: there is no drift budget to spend, so there is no
+ * tolerance to name, and the two {@code MathUtils} constants that once existed for this
+ * were removed rather than left to imply otherwise.
+ *
+ * <p>Hop arithmetic: the initiator sends {@code hops = 0}; each relayer adds one; so a
+ * certificate returning to its initiator carries {@code cycleLength - 1}, and the
+ * initiator supplies the closing hop itself. Pinned by
+ * {@code VoltageCertificateFlowTest} on both a 3-cycle and a 4-cycle.
  *
  * <p>A certificate is never stored in a field of its own. It lives in messages, rides back
  * unchanged on rejections and statuses, and stays queued in the inbox while a robot is in
@@ -70,8 +84,11 @@ public class VoltageCertificate {
      * different candidate after a rejection with no extension to undo.
      *
      * @param inboundHop {@code T(parent -> me)}, measured from this robot's own observation
-     *                   of the parent that relayed to it. Never {@code T(me -> child)};
-     *                   see the class javadoc.
+     *                   of the parent that relayed to it -- never {@code T(me -> child)},
+     *                   which would sample a pose the child has not reached yet. The
+     *                   product of these telescopes, so at closure it is the identity by
+     *                   construction; see the class javadoc for why that is an invariant to
+     *                   check rather than a geometric test to tune.
      * @return a new certificate one hop longer
      */
     public VoltageCertificate extend(RigidBodyTransformation inboundHop) {
@@ -98,8 +115,14 @@ public class VoltageCertificate {
     }
 
     /**
-     * The accumulated measured transform, composed left-to-right in walk order. Only
-     * meaningful as a closure test once the initiator has added the closing hop.
+     * The accumulated measured transform, composed left-to-right in walk order.
+     *
+     * <p>Once the initiator has added its closing hop this is the identity, exactly, for a
+     * walk that returned to the robot that minted it -- not approximately, and not within
+     * any tolerance. Read it as a consistency check: anything other than zero displacement
+     * and zero rotation means the walk ended somewhere other than where it began, or a
+     * robot moved while the certificate was in flight. Do not read it as a measure of
+     * accumulated placement error; it cannot be one. See the class javadoc.
      */
     public RigidBodyTransformation getMeasuredVoltage() {
         return measuredVoltage;

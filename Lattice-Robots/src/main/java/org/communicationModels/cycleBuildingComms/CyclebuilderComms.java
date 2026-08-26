@@ -2,15 +2,18 @@ package org.communicationModels.cycleBuildingComms;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 import org.communicationModels.Observation;
 import org.communicationModels.TrustLevel;
 import org.communicationModels.cycleBuildingComms.Messages.AbstractMessage;
 import org.communicationModels.cycleBuildingComms.Messages.AttemptLaterMessage;
+import org.communicationModels.cycleBuildingComms.Messages.CertificateLostMessage;
 import org.communicationModels.cycleBuildingComms.Messages.VoltageCertificate;
 import org.communicationModels.cycleBuildingComms.Messages.PositioningMessage;
 import org.communicationModels.cycleBuildingComms.Messages.PromotionMessage;
@@ -43,9 +46,26 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     // State-Data
     private int stableID;
-    private int pendingChildID;
     private boolean hasBeenAssigned;
     private VoltageCertificate certificate;
+
+    /**
+     * The faces this robot currently owes an offer or a response on -- see
+     * {@link FaceObligation}.
+     *
+     * <p><strong>Capped at one entry for now</strong> ({@link #MAX_CONCURRENT_OBLIGATIONS}),
+     * which makes this an exact stand-in for the {@code pendingChildID} /
+     * {@code pendingChildEdge} pair it replaces: a robot still serves one face at a time,
+     * still gates its inbox while waiting on a child, still retries the same edge. The cap
+     * is what makes this migration falsifiable -- lifting it is a separate, later change,
+     * so if the simulation misbehaves after this one it is the representation that is
+     * wrong, not the new concurrency.
+     *
+     * <p>Outstanding is per-edge and means {@link FaceObligation#isUnfulfilled()} -- a null
+     * child. A filled slot leaves the robot free, because a response will arrive, route
+     * through that tuple, and clear it.
+     */
+    private final FaceObligationSet obligations = new FaceObligationSet();
 
     /**
      * The robot that assigned this one its lattice site, and the frame every derived
@@ -65,7 +85,6 @@ public class CyclebuilderComms extends CommunicationSystem {
      */
     private int anchorParentID;
     private CycleRole role;
-    private ArrayList<Integer> unableToDoAssignmentIDs;
 
     private int assignedVertexID;
     private int assignedOutgoingEdgeID;
@@ -87,15 +106,22 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     // Logging / instrumentation support (see CommsSnapshot, org.logging package)
     private ArrayList<OutgoingMessageRecord> sentThisTick;
-    // Visualization Support
-    private Edge pendingChildEdge;
+
+    /**
+     * How many faces this robot may serve at once.
+     *
+     * <p>One, deliberately. The tuple representation supports any number, but holding the
+     * cap here keeps the migration to it separable from the concurrency it enables: with
+     * the cap in place this class behaves exactly as the {@code pendingChildID} version
+     * did, so a regression after this change is a fault in the representation rather than
+     * in newly-parallel face building. Raising it is a later, isolated edit.
+     */
+    private static final int MAX_CONCURRENT_OBLIGATIONS = 1;
 
     public CyclebuilderComms(GeometricCycleLatticeRobot self, VoltageGraph graph) {
         this.graph = graph;
         this.trust = TrustLevel.Friendly;
         this.stableID = -1;
-        this.pendingChildID = -1;
-        this.pendingChildEdge = null;
         this.hasBeenAssigned = false;
         this.certificate = null;
         this.anchorParentID = -1;
@@ -105,7 +131,6 @@ public class CyclebuilderComms extends CommunicationSystem {
         this.observations = new HashMap<>();
         this.policy = new AvoidancePolicy(self);
         this.incomingMessages = new ConcurrentLinkedQueue<>();
-        this.unableToDoAssignmentIDs = new ArrayList<>();
         this.sentThisTick = new ArrayList<>();
         this.waitThisTimeStep = false;
         assignedVertexID = -1;
@@ -125,15 +150,13 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         RigidBodyTransformation globalToLocal = new RigidBodyTransformation(self.getPosition()).inverse();
 
-        //Check if pendingChild has left communication range; if cyclebuilder, check if someone occupies my spot
-        boolean childHasLeft = true;
+        //Check if a recorded child has left communication range; if cyclebuilder, check if someone occupies my spot
+        Set<Integer> childrenStillPresent = new HashSet<>();
         boolean assignmentOccupied = false;
         OrientedPoint myAssignment = getAssignedLocalPosition();
 
         for(GeometricCycleLatticeRobot neighbor : neighbors) {
-            if(neighbor.getRobotId() == pendingChildID) {
-                childHasLeft = false;
-            }
+            childrenStillPresent.add(neighbor.getRobotId());
             if(role == CycleRole.cycleBuilder) {
                 OrientedPoint neighborPosition = globalToLocal.apply(neighbor.getPosition());
                 //EDIT FOR PROPER ANGLE PRESERVATION (NEW ANGLE PRESERVATION EXISTS)
@@ -150,12 +173,7 @@ public class CyclebuilderComms extends CommunicationSystem {
             observations.put(neighbor.getRobotId(), obs);
         }
 
-        if(childHasLeft && pendingChildID != -1) {
-            log("-> child " + pendingChildID + " has left, clearing pendingChildID");
-            self.getEdges().remove(pendingChildEdge);
-            pendingChildEdge = null;
-            pendingChildID = -1; // HAS MUTATED STATE
-        }
+        collectDepartedChildren(childrenStillPresent);
 
         if(assignmentOccupied && role == CycleRole.cycleBuilder) {
             forwardRejectionToParent(false);
@@ -191,13 +209,19 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         AbstractMessage peek = incomingMessages.peek();
 
-        // Root/stable must always accept a closing PositioningMessage — don't gate on pendingChildID
+        // Root/stable must always accept a closing PositioningMessage — don't gate on a pending child
         boolean bypassPendingGate = (role == CycleRole.root || role == CycleRole.stable)
-                && (peek instanceof PositioningMessage || peek instanceof StatusMessage || peek instanceof RejectAssignmentMessage || peek instanceof AttemptLaterMessage);
+                && (peek instanceof PositioningMessage || peek instanceof StatusMessage
+                    || peek instanceof RejectAssignmentMessage || peek instanceof AttemptLaterMessage
+                    || peek instanceof CertificateLostMessage);
 
-        if (!bypassPendingGate && pendingChildID != -1 && peek.getSenderId() != pendingChildID) {
+        // At a cap of one this is the old pendingChildID gate exactly. It survives the
+        // migration unchanged on purpose: lifting it belongs with lifting the cap, since a
+        // robot serving several faces has to answer for the ones it is not waiting on.
+        int pendingChild = pendingChildID();
+        if (!bypassPendingGate && pendingChild != -1 && peek.getSenderId() != pendingChild) {
             incomingMessages.add(incomingMessages.poll());
-            return "N/A (Waiting for pending child " + pendingChildID + ")";
+            return "N/A (Waiting for pending child " + pendingChild + ")";
         }
         if(!validateSenderIsNeighbor(peek.getSenderId())) {
             log("-> sender " + peek.getSenderId() + " is not a neighbor, discarding message");
@@ -223,7 +247,12 @@ public class CyclebuilderComms extends CommunicationSystem {
                     resetToCycleBuilder();
                     setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
                     setOriginEdge(pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
-                    unableToDoAssignmentIDs.add(pm.getSenderId());
+                    // The parent used to be banned here, into a robot-scoped exclusion list.
+                    // It is now excluded structurally by anchorParentID in
+                    // findBestNeighborForEdge, which is both narrower and impossible to
+                    // forget -- and the ban could not live on an obligation anyway, since the
+                    // one this robot will owe is not created until it knows which edge that
+                    // is, on arrival.
                     certificate = pm.getCertificate();
                     // Set here and nowhere else: this is the only transition that decides
                     // which robot this one is anchored to. See the anchorParentID javadoc.
@@ -254,16 +283,26 @@ public class CyclebuilderComms extends CommunicationSystem {
                     log("-> child reported FAILURE, forwarding upstream");
                     forwardFailureUpstream();
                     return "Status Message from " + sm.getSenderId() + "(FAILURE)";
+                } else if(next instanceof CertificateLostMessage cm) {
+                    // The walk broke below this robot. Its own tuple stays intact -- the
+                    // topology it describes is still correct, only the message in flight was
+                    // lost -- and the report keeps travelling to the initiator, the only
+                    // robot that can mint a replacement certificate.
+                    log("-> certificate lost below " + cm.getSenderId() + ", forwarding upstream");
+                    forwardCertificateLostUpstream(cm);
+                    return "Certificate Lost Message from " + cm.getSenderId() + "(FORWARDED)";
                 } else if(next instanceof RejectAssignmentMessage rm) {
-                    pendingChildID = -1; // HAS MUTATED STATE
-                    removeEdgeToChild(rm.getSenderId());
+                    // Release, not remove: the child declined, but this robot still owes the
+                    // same edge to somebody, and the certificate came back on the rejection
+                    // so there is something to re-offer with.
+                    releaseObligationOfChild(rm.getSenderId());
                     log("-> assignment REJECTED by " + rm.getSenderId());
                     if(rm.isRetryable()) {
                         forwardRejectionToParent(true);
                         resetToUnassigned();
                         log("-> assignment is retryable, will attempt to reassign");
                     } else if(isChainRoot(rm.getSenderId())) {
-                        // Never ban the chain's root. unableToDoAssignmentIDs gates only the
+                        // Never ban the chain's root. The ban list gates only the
                         // cycle-closing test at the top of findBestNeighborForEdge -- the
                         // general candidate loop underneath it already excludes the root by
                         // id -- so banning the root buys nothing when the mismatch is real
@@ -274,7 +313,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                         // pick a stranger for the closing edge and drive it onto the root.
                         log("-> assignment is NOT retryable, but sender is the chain root; not banning it, will retry the close");
                     } else {
-                        unableToDoAssignmentIDs.add(rm.getSenderId()); // HAS MUTATED STATE (single-edge-scoped for cycleBuilder, unlike root's equivalent below)
+                        banOnCurrentFace(rm.getSenderId());
                         log("-> assignment is NOT retryable, will not attempt to reassign");
                     }
                     return "Reject Assignment Message from " + rm.getSenderId() + "(REJECTED, " + (rm.isRetryable() ? "RETRYABLE)" : " NOT RETRYABLE)");
@@ -283,7 +322,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                     return "Promotion Message from " + pm.getSenderId() + "(DEFERRED - already cycleBuilder)";
                 } else if(next instanceof PositioningMessage pm) {
                     // If the sender is our pending child, we can accept the message and process it normally.
-                    if(pm.getSenderId() == pendingChildID) {
+                    if(pm.getSenderId() == pendingChildID()) {
                         //Check if assignment is to current location
                         if(!checkAssignmentForCurrentPosition(pm)) {
                             forwardRejectionUpstream(pm, false);
@@ -297,7 +336,6 @@ public class CyclebuilderComms extends CommunicationSystem {
                             resetToCycleBuilder();
                             setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
                             setOriginEdge(pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
-                            unableToDoAssignmentIDs.add(pm.getSenderId());
                             certificate = pm.getCertificate();
                             anchorParentID = pm.getSenderId();
                             log("-> Positioning Message from " + pm.getSenderId() + "(ACCEPTED, incoming chain list is larger)");
@@ -318,7 +356,6 @@ public class CyclebuilderComms extends CommunicationSystem {
                                 resetToCycleBuilder();
                                 setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
                                 setOriginEdge(pm.getOriginVertexID(), pm.getOriginOutgoingEdgeID());
-                                unableToDoAssignmentIDs.add(pm.getSenderId());
                                 certificate = pm.getCertificate();
                                 anchorParentID = pm.getSenderId();
                                 log("-> Positioning Message from " + pm.getSenderId() + "(ACCEPTED, incoming root ID is smaller");
@@ -354,19 +391,31 @@ public class CyclebuilderComms extends CommunicationSystem {
                         log("-> cycle on edge " + sm.getOriginOutgoingEdgeID() + " FAILED, moving on");
                         return "Status Message from " + sm.getSenderId() + "(FAILURE)";
                     }
+                } else if(next instanceof CertificateLostMessage cm) {
+                    // This root IS the initiator, so the report stops here. The corner is
+                    // marked attempted rather than unattempted so determineNextCycleToComplete
+                    // tries the other edges first and comes back to it, instead of spinning
+                    // on a corner that may be short of candidates.
+                    releaseObligationOfChild(cm.getSenderId());
+                    setCycleStatusOf(cm.getOriginOutgoingEdgeID(), CycleStatus.attempted);
+                    log("-> certificate for edge " + cm.getOriginOutgoingEdgeID()
+                            + " was lost below " + cm.getSenderId() + "; will relaunch it later");
+                    return "Certificate Lost Message from " + cm.getSenderId() + "(WILL RELAUNCH)";
                 } else if(next instanceof RejectAssignmentMessage rm) {
-                    pendingChildID = -1; // HAS MUTATED STATE
-                    removeEdgeToChild(rm.getSenderId());
+                    releaseObligationOfChild(rm.getSenderId());
                     log("-> assignment REJECTED by " + rm.getSenderId());
                     if(rm.isRetryable()) {
                         log("-> assignment is retryable, will attempt to reassign");
                     } else {
-                        unableToDoAssignmentIDs.add(rm.getSenderId()); // HAS MUTATED STATE (mid-edge exclusion -- do NOT swap for resetToRoot() here, that would wipe the exclusion this same edge still needs on retry)
+                        // Mid-edge exclusion. Scoped to this face's own obligation, so it
+                        // survives a retry of the same edge and disappears with the face --
+                        // which is what the old comment here had to warn about by hand.
+                        banOnCurrentFace(rm.getSenderId());
                         log("-> assignment is NOT retryable, will not attempt to reassign");
                     }
                     return "Reject Assignment Message from " + rm.getSenderId() + "(REJECTED, " + (rm.isRetryable() ? "RETRYABLE)" : " NOT RETRYABLE)");
                 } else if(next instanceof AttemptLaterMessage am) {
-                    pendingChildID = -1;
+                    releaseObligationOfChild(am.getSenderId());
                     CycleStatus previousStatus = setCycleStatusOf(am.getOriginOutgoingEdgeID(), CycleStatus.attempted);
                     if(previousStatus == CycleStatus.attempted) {
                         waitThisTimeStep = true;
@@ -462,7 +511,7 @@ public class CyclebuilderComms extends CommunicationSystem {
     public String sendMessage(boolean alreadyInPosition, int tick) {
         switch (role) {
             case CycleRole.root: {
-                if(pendingChildID != -1) {
+                if(pendingChildID() != -1) {
                     return "N/A (Waiting for Status Update to complete)";
                 } else if(hasFailed()) {
                     return "N/A (Ceased operations due to failure)";
@@ -490,17 +539,23 @@ public class CyclebuilderComms extends CommunicationSystem {
                 HalfEdge targetEdge = retrieveEdgeFromGraph(targetEdgeID);
 
                 // 2. Cycle does not exist. Build it!
-                GeometricCycleLatticeRobot childToBuild = findBestNeighborForEdge(targetEdge);
+                // The obligation for this face, created on first attempt and reused on every
+                // retry of the same edge -- which is what carries the ban list across a
+                // rejection instead of it having to be cleared by hand.
+                FaceObligation rootObligation = obligationFor(targetEdge);
+
+                GeometricCycleLatticeRobot childToBuild = findBestNeighborForEdge(targetEdge, rootObligation);
                 VoltageCertificate certificate = new VoltageCertificate(self.getRobotId());
                 if (childToBuild != null) {
                     PositioningMessage pm = new PositioningMessage(self.getRobotId(), childToBuild.getRobotId(), getVertexIDof(targetEdge), getEdgeIDof(targetEdge), getVertexIDof(targetEdge), getEdgeIDof(targetEdge), certificate);
                     send(childToBuild, pm);
-                    pendingChildEdge = new Edge(self.getRobotId(), childToBuild.getRobotId());
-                    self.addEdge(pendingChildEdge);
-                    pendingChildID = childToBuild.getRobotId(); // Wait for status
+                    Edge drawn = new Edge(self.getRobotId(), childToBuild.getRobotId());
+                    self.addEdge(drawn);
+                    rootObligation.fulfil(childToBuild.getRobotId(), drawn); // Wait for status
                 } else {
                     log("Ran out of options for building cycle on edge " + targetEdgeID + ", failing edge and moving on");
                     setCycleStatusOf(targetEdgeID, CycleStatus.failed);
+                    obligations.remove(rootObligation);
                     resetToRoot();
                     return "Failed (No valid neighbors for cycle, ceasing operations)";
                 }
@@ -511,7 +566,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                         + " for edge " + targetEdge.getId() + " of vertex " + targetEdge.getOrigin().getId();
             }
             case CycleRole.cycleBuilder: {
-                if(pendingChildID != -1) {
+                if(pendingChildID() != -1) {
                     return "N/A (Waiting for Status Update to complete)";
                 }
                 if(!alreadyInPosition) {
@@ -523,13 +578,18 @@ public class CyclebuilderComms extends CommunicationSystem {
 
                 HalfEdge targetEdge = inferNextEdge();
 
-                GeometricCycleLatticeRobot child = findBestNeighborForEdge(targetEdge);
+                // The obligation this robot owes onward, keyed on that outgoing edge. Created
+                // here rather than on acceptance because this is the first moment the robot
+                // knows it can act -- it is in position, so the edge it owes is decidable.
+                FaceObligation obligation = obligationFor(targetEdge);
+
+                GeometricCycleLatticeRobot child = findBestNeighborForEdge(targetEdge, obligation);
 
                 if(child == null) {
                     log("-> NO candidate found, forwarding FAILURE upstream");
                     forwardFailureUpstream();
                     return "Reporting Failure (No candidate found)";
-                } 
+                }
                 //ADD BACK HERE
                 log("-> assigning robot " + child.getRobotId() + " to edge " + targetEdge.getId());
 
@@ -552,9 +612,9 @@ public class CyclebuilderComms extends CommunicationSystem {
                 VoltageCertificate childCertificate = certificate.extend(inboundHop);
                 PositioningMessage pm = new PositioningMessage(self.getRobotId(), child.getRobotId(), getVertexIDof(targetEdge), getEdgeIDof(targetEdge), originVertexID, originOutgoingEdgeID, childCertificate);
                 send(child, pm);
-                pendingChildEdge = new Edge(self.getRobotId(), child.getRobotId());
-                self.addEdge(pendingChildEdge);
-                pendingChildID = child.getRobotId();
+                Edge drawn = new Edge(self.getRobotId(), child.getRobotId());
+                self.addEdge(drawn);
+                obligation.fulfil(child.getRobotId(), drawn);
                 return "Assigned position to robot " + child.getRobotId() + " for edge " + targetEdge.getId() + " of vertex " + targetEdge.getOrigin().getId();
             }
             case CycleRole.unassigned:
@@ -1090,7 +1150,7 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         for(HalfEdge edge : edges) {
             if(completedCycles.get(getEdgeIDof(edge)) == CycleStatus.complete) {
-                GeometricCycleLatticeRobot neighbor = findBestNeighborForEdge(edge);
+                GeometricCycleLatticeRobot neighbor = findBestNeighborForEdge(edge, null);
                 PromotionMessage pm = new PromotionMessage(self.getRobotId(), neighbor.getRobotId(), getVertexIDof(edge), getEdgeIDof(edge), !hasFailed());
                 send(neighbor, pm);
                 log("-> promoting neighbor on edge " + getEdgeIDof(edge) + " to root");
@@ -1132,15 +1192,26 @@ public class CyclebuilderComms extends CommunicationSystem {
         return certificate != null && certificate.getInitiatorID() == robotID;
     }
 
-    private GeometricCycleLatticeRobot findBestNeighborForEdge(HalfEdge targetEdge) {
+    /**
+     * Picks a robot to take {@code targetEdge}, excluding anyone banned on that face.
+     *
+     * @param obligation the face this offer belongs to, whose ban list scopes the
+     *                   exclusions. Null means no exclusions -- the
+     *                   {@code promoteAdjacentVerticesToRoots} path, which today gets that
+     *                   behaviour from an empty chain rather than by asking for it.
+     */
+    private GeometricCycleLatticeRobot findBestNeighborForEdge(HalfEdge targetEdge, FaceObligation obligation) {
         OrientedPoint targetLocal  = getTargetInLocalCoordinates(targetEdge);
             log("Beginning decision process");
 
         int rootID = certificate == null ? -1 : certificate.getInitiatorID();
 
-        // Root is only a candidate if it's not banned/parent, and check it separately from the rest
+        // Root is only a candidate if it's not banned/parent, and check it separately from
+        // the rest. The rootID != anchorParentID test replaces the blanket ban the accept
+        // path used to place on the parent: a direct child of the initiator must not "close"
+        // onto the robot that just assigned it, which would be a one-hop cycle.
         Observation rootObs = observations.get(rootID);
-        if (rootObs != null && !unableToDoAssignmentIDs.contains(rootID)) {
+        if (rootObs != null && rootID != anchorParentID && !isBannedOn(obligation, rootID)) {
             //EDIT FOR PROPER ANGLE PRESERVATION (NEW ANGLE PRESERVATION EXISTS)
             // Cycle closure on position alone. Both operands now carry meaningful
             // headings -- targetLocal from the edge's voltage, rootObs from the
@@ -1161,9 +1232,7 @@ public class CyclebuilderComms extends CommunicationSystem {
             // Walk-membership exclusion, narrowed. This used to read
             // !certificate.isInList(robotID), excluding every robot already on the walk;
             // the certificate no longer carries that roster, so what remains is the
-            // initiator (rootID, above) and the immediate parent. The parent is in
-            // unableToDoAssignmentIDs already -- it is banned on accept -- so the explicit
-            // test below is belt-and-braces rather than new coverage.
+            // initiator (rootID, above) and the immediate parent, tested explicitly below.
             //
             // What is no longer excluded is deeper ancestors: a builder can offer the next
             // edge to its own grandparent. That is self-correcting by design -- an ancestor
@@ -1174,17 +1243,16 @@ public class CyclebuilderComms extends CommunicationSystem {
             // next candidate. One wasted round trip per ancestor per face, and it cannot
             // repeat.
             //
-            // INTERIM HAZARD, until pendingChildID is replaced by obligations: the gate at
-            // the top of processMessages rotates a PositioningMessage unread whenever the
-            // recipient has a pending child, so a mid-chain ancestor never reaches the
-            // position check above and never sends that rejection. Offerer, ancestor and the
-            // robot between them then wait on each other with no timeout. Requires the
-            // grandparent to be within COMM_RANGE (75), which means a 4-cycle of 50-unit
-            // edges -- OctagonSquare, HexagonSquareTriangle, DodecagonHexagonSquare,
-            // ElongatedTriangular. SnubSquare and Square are 70 (99 apart, out of range);
-            // on triangular faces the grandparent IS the initiator, excluded just below.
-            // Deleting the gate closes this.
-            if (robotID != rootID && robotID != anchorParentID && !unableToDoAssignmentIDs.contains(robotID)) {
+            // INTERIM HAZARD, until the pending-child gate goes: that gate rotates a
+            // PositioningMessage unread whenever the recipient is waiting on a child, so a
+            // mid-chain ancestor never reaches the position check above and never sends that
+            // rejection. Offerer, ancestor and the robot between them then wait on each other
+            // with no timeout. Requires the grandparent to be within COMM_RANGE (75), which
+            // means a 4-cycle of 50-unit edges -- OctagonSquare, HexagonSquareTriangle,
+            // DodecagonHexagonSquare, ElongatedTriangular. SnubSquare and Square are 70 (99
+            // apart, out of range); on triangular faces the grandparent IS the initiator,
+            // excluded just below. Deleting the gate closes this.
+            if (robotID != rootID && robotID != anchorParentID && !isBannedOn(obligation, robotID)) {
                 // A neighbor already sitting exactly at the target position must win outright,
                 // same as the root case above, and before the wedge test runs: that test's
                 // angle math is ill-conditioned right at zero distance (the target->candidate
@@ -1344,15 +1412,175 @@ public class CyclebuilderComms extends CommunicationSystem {
         return e.getId();
     }
 
-    private void removeEdgeToChild(int childID) {
-        if (childID == -1) return;
-        // Reference removal, not toId match: only undoes the specific
-        // speculative edge for this rejected offer, leaving any other
-        // (already-valid) edge to the same robot ID untouched.
-        if (pendingChildEdge != null && pendingChildEdge.getToId() == childID) {
-            self.getEdges().remove(pendingChildEdge);
+    /**
+     * Drops every obligation whose child is no longer observable, reporting each loss to
+     * the parent that is waiting on it.
+     *
+     * <p>Removal, not release. Today's code clears the child slot and re-offers on the
+     * spot, which works only because this robot still holds a copy of the certificate in a
+     * field. In the tuple design the certificate lives in messages: this robot forwarded
+     * the only copy it had, the child left with it, and nothing upstream can reconstruct
+     * it. Retrying locally is not a weaker option, it is unimplementable -- there is
+     * nothing left to offer. Only the initiator can mint a fresh certificate, so the loss
+     * has to travel.
+     *
+     * <p>This is the one place Phase 4 is not behaviour-preserving: a departed child now
+     * escalates instead of being replaced locally, so a face takes longer to rebuild and an
+     * extra message type appears in the log.
+     *
+     * @param stillPresent ids of every currently observable neighbour
+     */
+    private void collectDepartedChildren(Set<Integer> stillPresent) {
+        List<FaceObligation> departed = new ArrayList<>();
+        for (FaceObligation obligation : obligations.asList()) {
+            Integer childId = obligation.getChildId();
+            if (childId != null && !stillPresent.contains(childId)) {
+                departed.add(obligation);
+            }
         }
-        pendingChildEdge = null;
+
+        for (FaceObligation obligation : departed) {
+            log("-> child " + obligation.getChildId() + " has left with the certificate for edge "
+                    + obligation.getEdgeId() + "; reporting the loss upstream");
+            undrawChildEdge(obligation.getChildEdge());
+            obligations.remove(obligation);
+            reportCertificateLost(obligation);
+        }
+    }
+
+    /**
+     * Tells the robot waiting on this obligation that its certificate is gone.
+     *
+     * <p>A root that loses a child is itself the initiator, so there is nobody to tell: it
+     * marks its own corner {@code attempted} and picks the face up again on a later pass.
+     */
+    private void reportCertificateLost(FaceObligation obligation) {
+        if (role == CycleRole.root) {
+            setCycleStatusOf(obligation.getEdgeId(), CycleStatus.attempted);
+            return;
+        }
+
+        GeometricCycleLatticeRobot parent = getNeighborByID(obligation.getParentId());
+        if (parent == null) {
+            // Structurally unreachable: a parent is parked one lattice edge away, and every
+            // lattice's edge length is pinned below COMM_RANGE by FaceClosureTest. Logged
+            // rather than ignored, because if it ever fires that guard has been broken and
+            // the corner it names will hang.
+            log("-> cannot report lost certificate: parent " + obligation.getParentId()
+                    + " unreachable, which should be impossible");
+            return;
+        }
+        send(parent, new CertificateLostMessage(self.getRobotId(), parent.getRobotId(),
+                originVertexID, originOutgoingEdgeID));
+    }
+
+    /**
+     * Undraws the speculative edge an obligation drew for its child.
+     *
+     * <p>Reference removal, not a {@code toId} match: this only undoes the edge that this
+     * obligation drew, leaving any other already-valid edge to the same robot id alone.
+     * The reference now lives on the obligation rather than in one field, because with
+     * several obligations live a child id no longer identifies which edge object to pull.
+     */
+    private void undrawChildEdge(Edge drawn) {
+        if (drawn != null) {
+            self.getEdges().remove(drawn);
+        }
+    }
+
+    /**
+     * The child this robot is currently waiting on, or {@code -1}.
+     *
+     * <p>Derived rather than stored. At {@link #MAX_CONCURRENT_OBLIGATIONS} of one this is
+     * exactly the old {@code pendingChildID} field; once the cap lifts it becomes "any
+     * child", which is all the gates below ever meant by it.
+     */
+    private int pendingChildID() {
+        for (FaceObligation obligation : obligations.asList()) {
+            if (!obligation.isUnfulfilled()) {
+                return obligation.getChildId();
+            }
+        }
+        return -1;
+    }
+
+    /** Whether this robot may take on another face right now. */
+    private boolean canAcceptAnotherObligation() {
+        return obligations.size() < MAX_CONCURRENT_OBLIGATIONS;
+    }
+
+    /** A null obligation means no exclusions -- see {@link #findBestNeighborForEdge}. */
+    private static boolean isBannedOn(FaceObligation obligation, int robotID) {
+        return obligation != null && obligation.isBanned(robotID);
+    }
+
+    /**
+     * Frees the child slot of whichever obligation named this robot, keeping the tuple.
+     *
+     * <p>The parent and edge survive because this robot still owes that edge to somebody --
+     * only the candidate changed. Bans accumulated on the face survive too, which is what
+     * stops the next offer going straight back to the robot that just declined.
+     */
+    private void releaseObligationOfChild(int childID) {
+        FaceObligation obligation = obligations.findByChild(childID);
+        if (obligation == null) {
+            return;
+        }
+        undrawChildEdge(obligation.release());
+    }
+
+    /**
+     * Excludes a robot from the face this one is currently building.
+     *
+     * <p>Scoped to the obligation rather than to the robot, so the exclusion disappears when
+     * the face does and cannot leak onto an unrelated face. That scoping is what let the
+     * four hand-written {@code unableToDoAssignmentIDs.clear()} calls in the reset family
+     * go away.
+     */
+    private void banOnCurrentFace(int robotID) {
+        FaceObligation obligation = currentObligation();
+        if (obligation != null) {
+            obligation.ban(robotID);
+        }
+    }
+
+    /**
+     * The obligation this robot is working on, or null.
+     *
+     * <p>Single-valued only because the cap is one. When the cap lifts, every caller of this
+     * has to name the face it means instead -- which is the point of routing them through
+     * one method now.
+     */
+    private FaceObligation currentObligation() {
+        List<FaceObligation> held = obligations.asList();
+        return held.isEmpty() ? null : held.get(0);
+    }
+
+    /** Forwards a lost-certificate report to this robot's own parent, keeping its tuple. */
+    private void forwardCertificateLostUpstream(CertificateLostMessage cm) {
+        GeometricCycleLatticeRobot parent = getNeighborByID(anchorParentID);
+        if (parent == null) {
+            log("-> cannot forward lost certificate: parent " + anchorParentID + " unreachable");
+            return;
+        }
+        send(parent, new CertificateLostMessage(self.getRobotId(), parent.getRobotId(),
+                cm.getOriginVertexID(), cm.getOriginOutgoingEdgeID()));
+    }
+
+    /**
+     * The obligation this robot owes on its outgoing edge for the face it is building,
+     * created on first use.
+     *
+     * <p>Keyed on the <strong>outgoing</strong> edge -- the one handed to the child. For a
+     * root that is the target edge chosen by {@link #determineNextCycleToComplete()}, which
+     * is already the key {@code completedCycles} uses; for a cycleBuilder it is
+     * {@code getNext(assignedEdge)}. Keying on the incoming edge would describe the same
+     * partition, since {@code getNext} is a bijection, but would put a root's obligation on
+     * a different key from its own cycle-status entry for no gain.
+     */
+    private FaceObligation obligationFor(HalfEdge outgoingEdge) {
+        int parentId = role == CycleRole.root ? self.getRobotId() : anchorParentID;
+        return obligations.getOrCreate(parentId, outgoingEdge.getId());
     }
 
     public void promoteToPrimaryRoot() {
@@ -1363,10 +1591,16 @@ public class CyclebuilderComms extends CommunicationSystem {
         initializeEdgeMap();
     }
 
+    /**
+     * Promotion leaves the obligation set alone, deliberately.
+     *
+     * <p>A promoted robot has not moved, so the local communication topology its tuples
+     * describe is still real and it still owes every response it owed a moment ago.
+     * Obligation lifetime keys on position, not role -- only vacating the lattice site
+     * clears the set.
+     */
     private void promoteSelfToStable() {
         role = CycleRole.stable;
-        this.pendingChildID = -1;
-        this.pendingChildEdge = null;
     }
 
     //ACCESSORS, MUTATORS, AND UTIL ----------------------------------------------------
@@ -1481,12 +1715,10 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     public void reset() {
-        this.pendingChildID = -1;
-        this.pendingChildEdge = null;
+        this.obligations.clearAll();
         this.certificate = null;
         this.anchorParentID = -1;
         this.role = CycleRole.unassigned;
-        unableToDoAssignmentIDs.clear();
 
         this.assignedVertexID = -1;
         this.assignedOutgoingEdgeID = -1;
@@ -1502,23 +1734,34 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     /**
-     * Clean slate for "unassigned": stableID, pendingChildID, certificate,
-     * unableToDoAssignmentIDs, and the assigned/origin edge references are all
-     * cleared, and role is set to unassigned. hasBeenAssigned is the one
-     * state-data field deliberately left untouched. Differs from the existing
-     * reset() above only in that it also clears stableID.
+     * Clean slate for "unassigned": stableID, obligations, certificate, and the
+     * assigned/origin edge references are all cleared, and role is set to unassigned.
+     * hasBeenAssigned is the one state-data field deliberately left untouched. Differs from
+     * the existing reset() above only in that it also clears stableID.
+     *
+     * <p><strong>This is the vacate path.</strong> A robot reaching here is giving up its
+     * lattice site -- contention yield, liveness give-up, or finding its assignment already
+     * occupied -- and the tuples it holds describe a local topology that is about to stop
+     * being true, so all of them go. Callers already send their rejection <em>before</em>
+     * calling this, which is why they carry that ordering comment.
+     *
+     * <p>At a cap of one, one rejection from the caller is exactly one rejection per tuple,
+     * because every tuple a robot holds names the same {@code anchorParentID}. When the cap
+     * lifts that stops being true and this must become
+     * {@link FaceObligationSet#drainForVacate()} with one rejection per returned obligation.
+     *
+     * <p>Note that the ban list is no longer cleared by hand here: bans live on the
+     * obligation, so they go when it does.
      */
     public void resetToUnassigned() {
         // The latched detour was chosen against a target this reset is discarding.
         policy.clearDetour();
         policy.resetProgress();
         this.stableID = -1;
-        this.pendingChildID = -1;
-        this.pendingChildEdge = null;
+        this.obligations.clearAll();
         this.certificate = null;
         this.anchorParentID = -1;
         this.role = CycleRole.unassigned;
-        this.unableToDoAssignmentIDs.clear();
 
         this.assignedVertexID = -1;
         this.assignedOutgoingEdgeID = -1;
@@ -1528,12 +1771,16 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     /**
-     * Clean slate for "cycleBuilder": stableID, pendingChildID, certificate,
-     * unableToDoAssignmentIDs, and both the assigned and origin edge references
-     * are cleared, and role is set to cycleBuilder. Meant to be immediately
-     * followed by setAssignedEdge/setOriginEdge and the caller's own
-     * certificate/unableToDoAssignmentIDs setup, the same way the
-     * unassigned -> cycleBuilder PositioningMessage handling does today.
+     * Clean slate for "cycleBuilder": stableID, obligations, certificate, and both the
+     * assigned and origin edge references are cleared, and role is set to cycleBuilder.
+     * Meant to be immediately followed by setAssignedEdge/setOriginEdge and the caller's own
+     * certificate setup, the same way the unassigned -> cycleBuilder PositioningMessage
+     * handling does today.
+     *
+     * <p>Obligations go for the same reason as in {@link #resetToUnassigned()}: accepting a
+     * new assignment means moving to a different lattice site, so the topology the old
+     * tuples described stops being true. This is not the promotion case -- a promotion
+     * leaves the robot where it is and keeps its tuples.
      */
     public void resetToCycleBuilder() {
         // The latched detour was chosen against a target this reset is discarding.
@@ -1544,13 +1791,11 @@ public class CyclebuilderComms extends CommunicationSystem {
         // routes through this method, so one edit covers every way an assignment lands.
         policy.cancelEvasion();
         this.stableID = -1;
-        this.pendingChildID = -1;
-        this.pendingChildEdge = null;
+        this.obligations.clearAll();
         this.hasBeenAssigned = true;
         this.certificate = null;
         this.anchorParentID = -1;
         this.role = CycleRole.cycleBuilder;
-        this.unableToDoAssignmentIDs.clear();
 
         this.assignedVertexID = -1;
         this.assignedOutgoingEdgeID = -1;
@@ -1560,13 +1805,19 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     /**
-     * Clean slate for a root moving on to its next outgoing edge: pendingChildID,
-     * certificate, unableToDoAssignmentIDs, and the origin edge reference are
-     * cleared, role is (re-)set to root, and hasFailed is forced back to false.
-     * stableID and the assigned edge are deliberately left untouched -- they're
-     * the root's own identity/position in the graph, not per-edge state. Same
-     * reasoning excludes completedCycles entirely: it's the record of progress
-     * this reset exists to avoid corrupting.
+     * Clean slate for a root moving on to its next outgoing edge: obligations, certificate
+     * and the origin edge reference are cleared, role is (re-)set to root, and hasFailed is
+     * forced back to false. stableID and the assigned edge are deliberately left untouched
+     * -- they're the root's own identity/position in the graph, not per-edge state. Same
+     * reasoning excludes completedCycles entirely: it's the record of progress this reset
+     * exists to avoid corrupting.
+     *
+     * <p><strong>Clearing obligations here is a cap-of-one shortcut, not the rule.</strong>
+     * A root has not moved, so by the position-not-role principle its tuples should survive;
+     * it is only safe to drop them because at a cap of one the single tuple always belongs
+     * to the edge this reset is finishing. Once a root can build several faces at once,
+     * this must remove only the finished edge's obligation and leave the rest -- otherwise
+     * it silently discards responses the root still owes on its other faces.
      */
     public void resetToRoot() {
         // The latched detour was chosen against a target this reset is discarding.
@@ -1574,12 +1825,10 @@ public class CyclebuilderComms extends CommunicationSystem {
         policy.resetProgress();
         // A promoted robot is an anchor; it has no business still stepping aside.
         policy.cancelEvasion();
-        this.pendingChildID = -1;
-        this.pendingChildEdge = null;
+        this.obligations.clearAll();
         this.certificate = null;
         this.anchorParentID = -1;
         this.role = CycleRole.root;
-        this.unableToDoAssignmentIDs.clear();
 
         this.originVertexID = -1;
         this.originOutgoingEdgeID = -1;
@@ -1615,7 +1864,10 @@ public class CyclebuilderComms extends CommunicationSystem {
                 role,
                 trust,
                 hasFailed(),
-                pendingChildID,
+                // Derived, not stored. Keeping this field means RobotFrameView and
+                // TickRecord.changed() need no edit, which decouples logging churn from
+                // protocol churn -- the obligations below are what new code should read.
+                pendingChildID(),
                 stableID,
                 certificate,
                 getAssignedEdge(),
@@ -1623,7 +1875,7 @@ public class CyclebuilderComms extends CommunicationSystem {
                 Map.copyOf(completedCycles),
                 snapshotQueueInOrder(),
                 Map.copyOf(observations),
-                List.copyOf(unableToDoAssignmentIDs)
+                List.copyOf(obligations.asList())
         );
     }
 

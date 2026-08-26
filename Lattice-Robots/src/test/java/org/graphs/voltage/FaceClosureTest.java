@@ -38,6 +38,23 @@ class FaceClosureTest {
     private static final double EXACT_POSITION = 1e-9;
     private static final double EXACT_ANGLE = 1e-9;
 
+    /**
+     * Illustrative tolerances for exercising the two-tolerance overload -- a
+     * position-sized one and an angle-sized one, far enough apart that a single scalar
+     * cannot serve both.
+     *
+     * <p>Local to this file on purpose. They were briefly {@code MathUtils} constants
+     * intended to gate face closure, until the certificate's accumulated product turned
+     * out to telescope: each relayer composes {@code T(parent -> me)}, so a walk composes
+     * to {@code P_0^-1 . P_k} and the initiator's closing hop makes it exactly the
+     * identity for any poses at all. There is no drift budget to spend, so there is no
+     * protocol tolerance to name -- closure rests on the initiator's identity and the hop
+     * count. These stay as test fixtures for the primitive, which is still correct and
+     * still worth pinning.
+     */
+    private static final double POSITION_TOLERANCE = 1.0;
+    private static final double ANGLE_TOLERANCE = 1e-1;
+
     /** Every shipped lattice, named so a failure says which one broke. */
     static Stream<Arguments> lattices() {
         return Stream.of(
@@ -97,7 +114,7 @@ class FaceClosureTest {
      * with a nonzero orientation:
      * <ul>
      *   <li>a reversal test would assert a falsehood, so none is written here;</li>
-     *   <li>{@link MathUtils#CLOSURE_ANGLE_EPSILON} has no discriminating power over
+     *   <li>the angular half of any closure test has no discriminating power over
      *       ideal voltages -- the whole content of a closure test lives in the position
      *       term.</li>
      * </ul>
@@ -233,16 +250,16 @@ class FaceClosureTest {
         RigidBodyTransformation spun = new RigidBodyTransformation(new OrientedPoint(0, 0, 0.5));
         assertTrue(spun.isApproximatelyIdentity(1.0),
                 "precondition: a position-sized scalar admits this rotation");
-        assertFalse(spun.isApproximatelyIdentity(1.0, MathUtils.CLOSURE_ANGLE_EPSILON),
+        assertFalse(spun.isApproximatelyIdentity(1.0, ANGLE_TOLERANCE),
                 "the overload must reject a rotation no position-sized tolerance can catch");
 
         // Half a unit of drift, perfectly aligned: acceptable for a closure, but rejected
         // outright by any scalar tight enough to have pinned the rotation above.
         RigidBodyTransformation drifted = new RigidBodyTransformation(new OrientedPoint(0.5, 0, 0));
-        assertFalse(drifted.isApproximatelyIdentity(MathUtils.CLOSURE_ANGLE_EPSILON),
+        assertFalse(drifted.isApproximatelyIdentity(ANGLE_TOLERANCE),
                 "precondition: an angle-sized scalar rejects this translation");
         assertTrue(drifted.isApproximatelyIdentity(
-                        MathUtils.CLOSURE_POSITION_EPSILON, MathUtils.CLOSURE_ANGLE_EPSILON),
+                        POSITION_TOLERANCE, ANGLE_TOLERANCE),
                 "the overload must admit drift well inside the closure budget");
     }
 
@@ -251,7 +268,7 @@ class FaceClosureTest {
     void emptyWalkIsNotACycle() {
         VoltageGraph graph = SquareVoltageGraph.build();
         assertFalse(graph.validateCycle(List.of(),
-                MathUtils.CLOSURE_POSITION_EPSILON, MathUtils.CLOSURE_ANGLE_EPSILON));
+                POSITION_TOLERANCE, ANGLE_TOLERANCE));
     }
 
     // --- helpers -----------------------------------------------------------------
