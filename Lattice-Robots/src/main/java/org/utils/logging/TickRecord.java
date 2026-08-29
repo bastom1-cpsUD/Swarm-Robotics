@@ -39,18 +39,20 @@ public record TickRecord(
      */
     public boolean changed() {
         return before.role() != after.role()
-                || before.pendingChildID() != after.pendingChildID()
                 || before.stableID() != after.stableID()
                 || before.hasFailed() != after.hasFailed()
                 || before.queueInOrder().size() != after.queueInOrder().size()
                 || !before.completedCycles().equals(after.completedCycles())
                 || !sameEdge(before.assignedEdge(), after.assignedEdge())
                 || !sameEdge(before.originEdge(), after.originEdge())
-                // A relay leaves everything else on this robot untouched -- same role, same
-                // edges, same pending child -- so without this a tick whose only effect was
-                // extending a certificate goes unlogged, which is exactly the tick the drift
-                // measurement needs to see.
-                || !java.util.Objects.equals(before.certificate(), after.certificate())
+                // The obligations, which took over from the pendingChildID and certificate
+                // comparisons that used to sit here. Both of those were single-valued and
+                // stopped meaning anything once a robot serves several faces; between them
+                // they were also trying to say what this one comparison says outright, which
+                // is "did any face this robot is working on move". A relay leaves role, edges
+                // and pose untouched, so without this the tick whose only effect was carrying
+                // a walk one hop goes unlogged -- exactly the tick worth seeing.
+                || !before.obligations().equals(after.obligations())
                 || !samePose(poseBefore, poseAfter)
                 || !sent.isEmpty();
     }

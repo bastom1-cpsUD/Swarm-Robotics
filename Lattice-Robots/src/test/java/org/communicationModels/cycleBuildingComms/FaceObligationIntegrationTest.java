@@ -1,7 +1,9 @@
 package org.communicationModels.cycleBuildingComms;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.graphs.util.OrientedPoint;
 import org.graphs.voltage.HalfEdge;
@@ -17,18 +19,28 @@ import org.utils.logging.TickRecord;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Phase 4 of the migration: communication tuples replace {@code pendingChildID}, capped at
- * one concurrent face.
+ * The tuple itself, one face at a time: that it records the right parent and edge, that a
+ * rejection <em>releases</em> the child slot while a status <em>removes</em> the tuple, that
+ * a promotion keeps it and vacating a site clears it. None of that needs concurrency to be
+ * true, which is why it stays here rather than moving to {@link ConcurrentFaceTest}.
  *
- * <p>The cap is what makes this phase testable as a migration rather than as a feature. It
- * buys nothing on purpose -- with one obligation the robot serves one face at a time, gates
- * its inbox the same way, and retries the same edge -- so a regression here is a fault in
- * the representation, not in newly-parallel face building. The evidence for that is the
- * whole existing suite staying green, including the two defect characterizations.
+ * <p>Written for Phase 4, where communication tuples replaced {@code pendingChildID} behind
+ * a cap of one concurrent face. The cap is what made that phase testable as a migration
+ * rather than as a feature -- it bought nothing on purpose, so a regression was a fault in
+ * the representation and not in newly-parallel face building, and the evidence was the whole
+ * suite staying green.
  *
- * <p>These tests cover what the suite cannot see from outside: that the tuple records the
- * right parent and edge, that a rejection <em>releases</em> the child slot while a status
- * <em>removes</em> the tuple, and that vacating a site clears it.
+ * <p>Two of the rules these tests were written against have since been superseded, and both
+ * were the cap in disguise:
+ *
+ * <ul>
+ *   <li><strong>The inbox gate is gone.</strong> Phase 5 replaced the pending-child gate with
+ *       "an unfulfilled obligation takes the tick"; Phase 6 removed gating altogether. What
+ *       was being guarded is one tuple per edge, and the obligation set enforces that
+ *       directly.</li>
+ *   <li><strong>The cap is a structure, not a number.</strong> {@code capOfOneHoldsThroughoutARun}
+ *       became {@link #oneObligationPerEdgeHoldsThroughoutARun()} -- see there.</li>
+ * </ul>
  */
 class FaceObligationIntegrationTest {
 
@@ -69,30 +81,64 @@ class FaceObligationIntegrationTest {
         assertEquals(1, held.size(), "one face at a time at a cap of one");
 
         FaceObligation obligation = held.get(0);
-        assertEquals(root.getRobotId(), obligation.getParentId(),
-                "a root initiates its own face, so it is its own tuple's parent");
+        assertEquals(FaceObligation.NO_PARENT, obligation.getParentId(),
+                "a face this robot initiated is owed to nobody, so it has no parent. This used "
+                        + "to read as the robot being its own parent, which said the same thing "
+                        + "by riddle and put the tuple in the carried set alongside real debts.");
         assertNotNull(obligation.getChildId(), "the offer went out, so the slot is filled");
         assertNotNull(obligation.getChildEdge(),
                 "the drawn edge belongs to the obligation, so it can be undrawn per-face");
     }
 
     /**
-     * The cap, asserted rather than assumed. If this ever fails the phase has stopped being
-     * a migration and started being the concurrency change it is meant to precede.
+     * <strong>Was {@code capOfOneHoldsThroughoutARun}. Phase 6 lifted the cap, so the
+     * assertion inverts from a number to a structure.</strong>
+     *
+     * <p>The flat cap of one was scaffolding: it made Phases 4 and 5 behave exactly as the
+     * {@code pendingChildID} version did, so a regression in either was a fault in the tuple
+     * representation rather than in newly-parallel face building. What replaces it is not a
+     * bigger number but a different kind of bound -- one tuple per incident edge, enforced by
+     * {@link FaceObligationSet#getOrCreate} rather than counted. That bound is what actually
+     * matters: a second tuple on one edge would mean two walks being carried across the same
+     * hop with one child slot between them, and the responses would route to the wrong parent.
+     *
+     * <p>Stated over the <em>carried</em> walks, since separating this robot's own attempt into
+     * its own slot. The bound the cap used to spell as {@code outgoing + 1} decomposes into the
+     * two assertions below, each of which is a fact about one container rather than a number
+     * needing an explanation.
      */
     @Test
-    @DisplayName("no robot ever holds more than one obligation while the cap is one")
-    void capOfOneHoldsThroughoutARun() {
+    @DisplayName("no robot ever holds two carried walks on the same edge, or two faces of its own")
+    void oneObligationPerEdgeHoldsThroughoutARun() {
         List<GeometricCycleLatticeRobot> robots =
                 LatticeHarness.placeOnFace(GRAPH, firstOutgoingEdge(), new OrientedPoint(0, 0, 0));
         robots.get(0).promoteToPrimaryRoot();
 
         List<TickRecord> records = LatticeHarness.tick(robots, 40);
 
+        int outgoingEdges = GRAPH.getOutgoingHalfEdges(GRAPH.getPrimaryRole()).size();
         for (TickRecord record : records) {
-            assertTrue(record.after().obligations().size() <= 1,
-                    "robot " + record.robotId() + " held " + record.after().obligations().size()
-                            + " obligations at tick " + record.tick());
+            List<FaceObligation> held = record.after().obligations();
+
+            Set<Integer> carriedEdges = new HashSet<>();
+            int attempts = 0;
+            for (FaceObligation obligation : held) {
+                if (obligation.getParentId() == FaceObligation.NO_PARENT) {
+                    attempts++;
+                    continue;
+                }
+                assertTrue(carriedEdges.add(obligation.getEdgeId()),
+                        "robot " + record.robotId() + " held two carried walks on edge "
+                                + obligation.getEdgeId() + " at tick " + record.tick()
+                                + "; one child slot cannot serve two walks");
+            }
+
+            assertTrue(attempts <= 1,
+                    "robot " + record.robotId() + " held " + attempts + " faces of its own at tick "
+                            + record.tick() + "; FaceObligationSet holds a single slot for that");
+            assertTrue(carriedEdges.size() <= outgoingEdges,
+                    "robot " + record.robotId() + " carried " + carriedEdges.size()
+                            + " walks at tick " + record.tick() + ", past one per incoming edge");
         }
     }
 
@@ -240,8 +286,6 @@ class FaceObligationIntegrationTest {
                     "a tuple still names the departed child " + childId + "; its certificate "
                             + "left with it and cannot be re-offered");
         }
-        assertNotEquals(childId, afterDeparture.after().pendingChildID(),
-                "the root must stop waiting on a child that is gone");
     }
 
     /**

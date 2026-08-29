@@ -52,14 +52,16 @@ public record RobotFrameView(TickRecord rec, List<OrientedPoint> trajectory) imp
         log.pre("""
                 role:            %s -> %s
                 queue size:      %d -> %d
-                pendingChildID:  %d -> %d
+                obligations:     %s
+                              -> %s
                 processed:       %s
                 action:          %s
                 sent:            %s
                 """.formatted(
                 rec.before().role(), rec.after().role(),
                 rec.before().queueInOrder().size(), rec.after().queueInOrder().size(),
-                rec.before().pendingChildID(), rec.after().pendingChildID(),
+                describeObligations(rec.before()),
+                describeObligations(rec.after()),
                 rec.processedDescription(),
                 rec.actionDescription(),
                 rec.sent().isEmpty() ? "(none)" : rec.sent().toString())
@@ -99,6 +101,26 @@ public record RobotFrameView(TickRecord rec, List<OrientedPoint> trajectory) imp
                 describeStatuses(after));
     }
 
+    /**
+     * The faces this robot is working on, one per tuple.
+     *
+     * <p>Replaces the {@code pendingChildID} line this block used to carry. That line asked
+     * "which child am I waiting on", which had a single answer only while a robot served a
+     * single face; reading it after the cap lifted would have meant picking one tuple of
+     * several and printing it as though it were the whole story. Each entry reads
+     * {@code parent -> edge -> child}, with the parent being the robot itself on a face this
+     * one initiated, and {@code none} as the child while the offer is still outstanding --
+     * so a stalled robot and a busy one are told apart at a glance.
+     */
+    private static String describeObligations(CommsSnapshot snapshot) {
+        if (snapshot.obligations().isEmpty()) {
+            return "(none)";
+        }
+        return snapshot.obligations().stream()
+                .map(Object::toString)
+                .collect(java.util.stream.Collectors.joining(", "));
+    }
+
     private static String describeRemaining(CommsSnapshot snapshot) {
         if (!snapshot.tracksCycles()) {
             return "n/a";
@@ -110,6 +132,11 @@ public record RobotFrameView(TickRecord rec, List<OrientedPoint> trajectory) imp
      * Per-edge breakdown of the remainder, sorted by half-edge id so the same
      * root reads the same way from one tick to the next — {@code completedCycles}
      * is a copy of a {@code HashMap}, whose iteration order carries no meaning.
+     *
+     * <p>Each corner carries the face it belongs to, which is what the doc's Task 7 wanted
+     * the face id <em>for</em>: reading a corner's shape straight off the log. On
+     * octagon-square one root closes a 4-cycle and an 8-cycle from adjoining edges, and
+     * without this they are indistinguishable rows of "edge N=complete".
      */
     private static String describeStatuses(CommsSnapshot snapshot) {
         if (!snapshot.tracksCycles()) {
@@ -117,7 +144,9 @@ public record RobotFrameView(TickRecord rec, List<OrientedPoint> trajectory) imp
         }
         return snapshot.completedCycles().entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
-                .map(entry -> "edge " + entry.getKey() + "=" + entry.getValue())
+                .map(entry -> "edge " + entry.getKey()
+                        + " [" + snapshot.describeFaceOf(entry.getKey()) + "]="
+                        + entry.getValue())
                 .collect(Collectors.joining(", "));
     }
 

@@ -7,6 +7,7 @@ import org.graphs.util.OrientedPoint;
 import org.graphs.util.RigidBodyTransformation;
 import org.graphs.voltage.Face;
 import org.graphs.voltage.HalfEdge;
+import org.graphs.voltage.Role;
 import org.graphs.voltage.VoltageGraph;
 import org.robots.GeometricCycleLatticeRobot;
 import org.utils.logging.CommsSnapshot;
@@ -69,6 +70,53 @@ final class LatticeHarness {
 
         makeAllNeighbors(robots);
         return robots;
+    }
+
+    /**
+     * Places one robot on every site of every face incident to {@code role}, with the robot
+     * that occupies {@code role} itself at {@code origin} and id 0.
+     *
+     * <p>{@link #placeOnFace} can only stand up scenarios one face wide, which is enough to
+     * test a walk but not enough to test a robot serving two faces at once -- the case the
+     * whole tuple representation exists for, and the one OctagonSquare makes least
+     * forgiving, where a 4-cycle and an 8-cycle meet at one corner.
+     *
+     * <p>Sites are deduplicated by pose. Adjacent faces genuinely share robots, and that
+     * sharing is the thing under test: placing two robots on one site would hand every test
+     * a spare candidate that the real lattice does not have, and would quietly turn a
+     * shared-corner scenario back into two independent faces.
+     *
+     * @return the robots, the one at {@code origin} first, already wired as mutual neighbours
+     */
+    static List<GeometricCycleLatticeRobot> placeAroundRole(VoltageGraph graph, Role role,
+                                                            OrientedPoint origin) {
+        List<OrientedPoint> sites = new ArrayList<>();
+        sites.add(origin);
+
+        for (HalfEdge start : graph.getOutgoingHalfEdges(role)) {
+            RigidBodyTransformation running = new RigidBodyTransformation(origin);
+            for (HalfEdge hop : boundaryFrom(start)) {
+                running = running.compose(hop.getVoltage());
+                addIfNewSite(sites, running.asPose());
+            }
+        }
+
+        List<GeometricCycleLatticeRobot> robots = new ArrayList<>(sites.size());
+        for (int i = 0; i < sites.size(); i++) {
+            robots.add(new GeometricCycleLatticeRobot(i, sites.get(i), graph));
+        }
+        makeAllNeighbors(robots);
+        return robots;
+    }
+
+    /** Adds a pose unless some site is already there, to floating point. */
+    private static void addIfNewSite(List<OrientedPoint> sites, OrientedPoint candidate) {
+        for (OrientedPoint existing : sites) {
+            if (existing.distance(candidate) < 1e-6) {
+                return;
+            }
+        }
+        sites.add(candidate);
     }
 
     /**

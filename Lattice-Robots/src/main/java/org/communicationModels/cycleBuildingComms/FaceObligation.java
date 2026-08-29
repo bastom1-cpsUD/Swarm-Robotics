@@ -50,6 +50,23 @@ import org.simulation.Edge;
  */
 public class FaceObligation {
 
+    /**
+     * The parent of a face this robot is building <em>for itself</em>: there isn't one.
+     *
+     * <p>A carried obligation is owed <em>to somebody</em> -- that is what makes it an
+     * obligation, and {@link #getParentId()} names them. A face this robot initiated is owed
+     * to nobody; it is an ambition rather than a debt, and nothing will ever be reported
+     * upward for it. The sentinel says so directly, where the previous spelling
+     * ({@code parentId == self}) said it by riddle -- a robot listed as its own parent.
+     *
+     * <p>Kept as a value on the tuple even though {@link FaceObligationSet} holds initiated
+     * faces in a slot of their own, because the two answer at different times. The container
+     * knows which is which only while it still holds the tuple; the sentinel travels with the
+     * tuple after it has been removed or drained, which is exactly when
+     * {@code forwardRejectionToParent} and {@code reportCertificateLost} need to ask.
+     */
+    public static final int NO_PARENT = -1;
+
     private final int parentId;
     private final int edgeId;
 

@@ -22,10 +22,14 @@ import org.communicationModels.cycleBuildingComms.Messages.TargetClaimMessage;
  * latest-wins per sender, unordered, and expiring on a TTL, so losing one costs nothing
  * because another follows.
  *
- * <p>They are kept apart deliberately. Feeding claims through the protocol queue would
- * let them starve real protocol messages, and would let the queue's own
- * {@code pendingChildID} gate delay a claim arbitrarily -- exactly the wrong latency for
- * a check whose whole purpose is to fire early. Real ad-hoc systems make the same split
+ * <p>They are kept apart deliberately. Feeding claims through the protocol queue would let
+ * them starve real protocol messages, and would put a claim behind however many addressed
+ * messages happen to be ahead of it in a queue that pops one a tick -- exactly the wrong
+ * latency for a check whose whole purpose is to fire early. (It used to be worse: the queue
+ * carried a {@code pendingChildID} gate that could defer a claim indefinitely. That gate is
+ * gone as of Phase 6, but the separation is not a workaround for it -- the two kinds of
+ * traffic have different delivery semantics, soft and latest-wins against addressed and
+ * ordered.) Real ad-hoc systems make the same split
  * (OLSR/BATMAN HELLO packets, or the 10 Hz SAE J2735 safety broadcasts that let vehicles
  * announce position and intent alongside ordinary addressed traffic).
  */

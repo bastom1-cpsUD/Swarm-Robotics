@@ -314,12 +314,35 @@ if (graph.validateCycle(traversedWalk)) {
 }
 ```
 
-`completedCycles` (currently `HashMap<Integer /*edge id*/, Boolean>`,
+> **What shipped instead.** Both halves of the diagnosis above are right — the
+> root-ID-equality heuristic was wrong, and the "is the next best neighbor
+> actually my root" check in `findBestNeighborForEdge` was closure logic
+> living outside the closure test. Both are gone. What replaced them is
+> `CyclebuilderComms.closesFace`, not a `validateCycle` call, because the
+> premise underneath the snippet turns out to be false: it assumes the walk's
+> geometry is what certifies the face. It cannot be. Each relayer composes
+> `T(parent → me)`, so the product telescopes to `P₀⁻¹·Pₖ` and the
+> initiator's own closing hop makes it **exactly** the identity — for any
+> poses whatsoever, including four robots forming no face at all. Measured,
+> not assumed: a robot displaced 150 units off its site still closes at
+> `0.000000000000`.
+>
+> So closure is decided by *identity and length*: the certificate must come
+> home to the robot that minted it, having taken exactly `cycleLength` hops.
+> The accumulated transform is still checked, at 1e-9, but as an **exactness
+> invariant rather than a drift budget** — the only two things it can catch
+> are a walk that ended at a different robot and a robot that moved
+> mid-flight, and both are logged as anomalies. Do not loosen it to something
+> lattice-sized; there is no error for a tolerance to absorb.
+
+~~`completedCycles` (currently `HashMap<Integer /*edge id*/, Boolean>`,
 keyed off the primary vertex's outgoing edges) becomes keyed off
-`Face.id()` instead of a raw edge id — it now tracks "which faces incident
-to the primary role have a completed perimeter," which generalizes cleanly
-once a lattice (like octagon-square) has more than one face type meeting at
-a role.
+`Face.id()` instead of a raw edge id~~ — **do not rekey; see task 7 in §6.**
+`Face` is a face *type*, so several outgoing edges of one role share a face
+id and the rekey collapses a square root's four corners into one. The
+generalization it was reaching for is right and free: `HalfEdge.getFace()`
+already says which face a corner is on, so a role bordering several face
+types works with the edge key untouched.
 
 The `isNull()` sentinel pattern (`new LatticeEdge()` as a null-object) can be
 dropped in favor of `HalfEdge` / `Role` being ordinary nullable references —
@@ -393,14 +416,33 @@ inspection.
    `getCurrentVertex` per §4; keep `assignedVertexID`/`assignedOutgoingEdgeID`
    or collapse them to a single `assignedHalfEdgeId` now that ids are
    globally unique (design choice — see §7).
-6. **Cycle validation** — add `ChainMemberList.toHalfEdgeWalk()` (or
+6. **Cycle validation** — ~~add `ChainMemberList.toHalfEdgeWalk()` (or
    equivalent) and route chain-closure decisions through
-   `graph.validateCycle(...)` instead of the current root-ID-equality
-   check, per §4.
-7. **`completedCycles` rework** — rekey from `outgoing-edge-id -> boolean`
-   to `face-id -> boolean` so `initializeEdgeMap()` /
-   `promoteAdjacentVerticesToRoots()` generalize to roles bordering more
-   than one face type.
+   `graph.validateCycle(...)`~~ **superseded; the intent is satisfied, the
+   literal call is not.** Chain-closure no longer rests on root-ID equality:
+   `CyclebuilderComms.closesFace` requires the certificate to have come home
+   to the robot that *minted* it, after exactly the face's `cycleLength`
+   hops, with the accumulated measured transform the identity. What was not
+   built is the walk roster this task's spelling needs. `ChainMemberList` was
+   replaced by `VoltageCertificate`, which carries three scalars — initiator,
+   hop count, accumulated transform — precisely so that what travels does not
+   grow with the walk; re-adding a list of traversed half-edge ids would be a
+   second, larger encoding of the same journey the transform already records.
+   `validateCycle` keeps its test call sites and stays the reference
+   definition of closure; it is simply not on the message path.
+7. **`completedCycles` rework** — ~~rekey from `outgoing-edge-id -> boolean`
+   to `face-id -> boolean`~~ **corrected: keep the edge key, read the face
+   off the half-edge.** Rekeying is a regression, because `Face` is a face
+   *type* and not an instance: several of a role's outgoing edges share one
+   face id — all four on a square lattice, all six on triangle — so the rekey
+   collapses four corners into one and six into two, and a root promotes
+   itself to stable after closing a single face. It compiles, and no test
+   goes red. The generalization this task wanted is real but costs nothing:
+   `HalfEdge.getFace()` already answers "which face is this corner on", so
+   `initializeEdgeMap()` and `promoteAdjacentVerticesToRoots()` generalize to
+   roles bordering several face types with the map untouched. See
+   `CommsSnapshot.describeFaceOf`, which renders it into the tick log
+   (`edge 7 [face 1, 8-cycle]=complete`) without storing a second copy.
 8. **Update `GeometricCycleLatticeRobot`** call sites (`getRole()`-adjacent
    plumbing is untouched; only the two-method surface it delegates through
    changes, per §4).

@@ -17,24 +17,31 @@ import org.utils.logging.TickRecord;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * <strong>These tests assert behaviour that is wrong.</strong>
+ * <strong>These two tests used to assert behaviour that was wrong. Phase 5 inverted them,
+ * and the inversion is the evidence the fix works.</strong>
  *
- * <p>They pin down the two defects the communication-tuple migration exists to fix, both
- * of which come from the same root cause: face completion is decided by <em>who</em> a
- * walk reaches rather than <em>whether the walk closed</em>. Until that changes, this is
- * what the protocol does, and a green test here means the defects are still present and
- * still reproducible.
+ * <p>Through Phases 0-4 they pinned down two defects, both from one root cause: face
+ * completion was decided by <em>who</em> a walk reached rather than <em>whether the walk
+ * closed</em>. They were written as passing tests rather than disabled ones precisely so
+ * this moment would be a visible edit rather than a silent one -- a disabled test proves
+ * nothing and rots, whereas flipping a green assertion is a deliberate act with a diff
+ * attached.
  *
- * <p>They are written as passing tests rather than disabled ones on purpose. A disabled
- * test proves nothing and rots silently; a passing one that documents a defect keeps
- * running, so if some unrelated change alters the behaviour, that shows up immediately as
- * a failure to investigate rather than as an unnoticed drift.
+ * <p>What replaced the defects, in both cases, is the closure predicate: a face closes when
+ * a certificate returns to the robot that <em>minted</em> it, having taken exactly the
+ * face's cycle length in hops, with the closed product the identity. Nothing about role or
+ * pose enters into it.
  *
- * <p><strong>Both assertions invert when the closure predicate lands.</strong>
- * {@code rootRingDefersForever} becomes {@code rootRingClosesFaces}, and
- * {@code pathBetweenTwoRootsIsCertifiedAsFace} becomes
- * {@code pathBetweenTwoRootsIsRejected}. That inversion is the evidence the fix works --
- * so when they start failing, read this file before assuming something broke.
+ * <ul>
+ *   <li>{@code rootRingDefersForever} became {@link #rootRingClosesFaces()}. Roots no
+ *       longer ask whether their own next edge is complete before carrying a neighbour's
+ *       walk -- they simply carry it -- so the ring closes instead of deferring around
+ *       itself forever.</li>
+ *   <li>{@code pathBetweenTwoRootsIsCertifiedAsFace} became
+ *       {@link #pathBetweenTwoRootsIsRelayedNotCertified()}. A root that is not the
+ *       initiator relays, so the three-hop path is no longer mistaken for a four-hop
+ *       face.</li>
+ * </ul>
  */
 class CycleClosureCharacterizationTest {
 
@@ -49,20 +56,21 @@ class CycleClosureCharacterizationTest {
     }
 
     /**
-     * <strong>Defect 1 — root-to-root deferral never terminates.</strong>
+     * <strong>Defect 1, fixed — a ring of adjacent roots now closes its face.</strong>
      *
-     * <p>A root receiving a {@code PositioningMessage} whose walk was initiated by the
-     * sender checks whether the <em>next</em> edge's cycle is already complete, and if not
-     * it emits {@code AttemptLaterMessage} back upstream. Put roots all the way around a
-     * face and each defers to the next: nobody is ever the one whose next edge is already
-     * done, so the deferral chases itself around the ring.
+     * <p>The old branch, on seeing a walk initiated by the sender, asked whether its own
+     * next edge was already complete and emitted {@code AttemptLaterMessage} upstream if
+     * not. Around a ring of roots nobody is ever the one whose next edge is already done,
+     * so the deferral chased itself forever.
      *
-     * <p>Asserted here as: no face reaches {@code complete}, and "Attempt Later" traffic
-     * keeps being generated rather than dying out.
+     * <p>A root now carries a walk it did not initiate without asking anything about its own
+     * progress -- only the initiator may judge a certificate. The second assertion is the
+     * load-bearing one: deferral is gone as a mechanism, not merely unused in this scenario,
+     * because {@code AttemptLaterMessage} no longer exists to be sent.
      */
     @Test
-    @DisplayName("DEFECT: a ring of adjacent roots defers forever and closes nothing")
-    void rootRingDefersForever() {
+    @DisplayName("a ring of adjacent roots closes its face instead of deferring")
+    void rootRingClosesFaces() {
         List<GeometricCycleLatticeRobot> robots =
                 LatticeHarness.placeOnFace(GRAPH, firstOutgoingEdge(), new OrientedPoint(0, 0, 0));
 
@@ -75,64 +83,79 @@ class CycleClosureCharacterizationTest {
 
         List<TickRecord> records = LatticeHarness.tick(robots, 40);
 
-        for (GeometricCycleLatticeRobot robot : robots) {
-            assertFalse(LatticeHarness.anyCycleComplete(records, robot.getRobotId()),
-                    "robot " + robot.getRobotId() + " completed a cycle. If the closure "
-                            + "predicate has landed, this test should now be rootRingClosesFaces "
-                            + "-- see the class javadoc.");
-        }
-
-        List<OutgoingMessageRecord> deferrals = LatticeHarness.messagesOfType(records, "Attempt Later");
-        assertFalse(deferrals.isEmpty(),
-                "expected roots to defer to one another; none did, so this scenario no longer "
-                        + "reproduces defect 1 and the test needs rebuilding rather than deleting");
-    }
-
-    /**
-     * <strong>Defect 2 — a path between two distinct roots is certified as a face.</strong>
-     *
-     * <p>A root reports SUCCESS purely because it is a root sitting at the right pose. It
-     * never asks whether the walk that arrived is the walk it started. Combined with
-     * {@code findBestNeighborForEdge} closing onto <em>any</em> neighbour already at the
-     * target, a walk that starts at root A and ends at a different root D is accepted as a
-     * closed face.
-     *
-     * <p>The walk here is a genuine face boundary and does return to the initiator's
-     * <em>site</em>, which is exactly why the bug is invisible: the geometry is right and
-     * the identity is not checked. What makes it a defect is that nothing in the protocol
-     * would have noticed if the walk had ended somewhere else entirely.
-     */
-    @Test
-    @DisplayName("DEFECT: closure is granted on role and pose, never on the walk returning")
-    void pathBetweenTwoRootsIsCertifiedAsFace() {
-        List<GeometricCycleLatticeRobot> robots =
-                LatticeHarness.placeOnFace(GRAPH, firstOutgoingEdge(), new OrientedPoint(0, 0, 0));
-
-        GeometricCycleLatticeRobot initiator = robots.get(0);
-        GeometricCycleLatticeRobot closer = robots.get(robots.size() - 1);
-
-        // Two roots on one face, with two plain builders between them. The walk leaves the
-        // initiator and arrives at a DIFFERENT root, which is the case the protocol cannot
-        // currently distinguish from a real closure.
-        initiator.promoteToPrimaryRoot();
-        closer.promoteToPrimaryRoot();
-
-        List<TickRecord> records = LatticeHarness.tick(robots, 40);
-
         boolean anyoneClosed = false;
         for (GeometricCycleLatticeRobot robot : robots) {
             anyoneClosed |= LatticeHarness.anyCycleComplete(records, robot.getRobotId());
         }
-
         assertTrue(anyoneClosed,
-                "no cycle was marked complete. Either the closure predicate has landed -- in "
-                        + "which case this test should now be pathBetweenTwoRootsIsRejected -- or "
-                        + "the scenario stopped exercising the closing branch at all.");
+                "a ring of roots closed nothing in 40 ticks. This is defect 1 back: a root "
+                        + "must carry a walk it did not initiate rather than waiting on its own "
+                        + "progress first -- see the class javadoc.");
 
-        // The defect in one line: closure was granted without any robot checking that the
-        // certificate came back to the robot that minted it.
-        assertNotEquals(initiator.getRobotId(), closer.getRobotId(),
+        List<OutgoingMessageRecord> deferrals = LatticeHarness.messagesOfType(records, "Attempt Later");
+        assertTrue(deferrals.isEmpty(),
+                "an 'Attempt Later' message was sent. That message type was deleted with the "
+                        + "closure predicate, and its only bound on a wandering walk was replaced "
+                        + "by the hop cap; if it is back, so is the deferral loop.");
+    }
+
+    /**
+     * <strong>Defect 2, fixed — a root that did not mint the certificate relays it.</strong>
+     *
+     * <p>The old code reported SUCCESS purely because it was a root sitting at the right
+     * pose, so a walk that left root A and arrived at a different root D was certified as a
+     * closed face -- here, a <em>three</em>-hop path accepted as a four-hop square. The
+     * geometry was right and the identity was never checked, which is exactly why the bug
+     * was invisible.
+     *
+     * <p>Closure now requires the certificate to come home to its minter. Robot 3 is a root
+     * standing on the right site with the right pose and is <em>still</em> not entitled to
+     * decide the walk, so it carries it one more hop, to the initiator, where the four-hop
+     * face closes properly. The assertion that matters is the relay: an Assignment leaving
+     * robot 3 for robot 0 is the walk continuing past the robot that used to terminate it.
+     */
+    @Test
+    @DisplayName("a walk reaching a different root is relayed onward, not certified")
+    void pathBetweenTwoRootsIsRelayedNotCertified() {
+        List<GeometricCycleLatticeRobot> robots =
+                LatticeHarness.placeOnFace(GRAPH, firstOutgoingEdge(), new OrientedPoint(0, 0, 0));
+
+        GeometricCycleLatticeRobot initiator = robots.get(0);
+        GeometricCycleLatticeRobot farRoot = robots.get(robots.size() - 1);
+
+        // Two roots on one face, with two plain builders between them. The walk leaves the
+        // initiator and arrives at a DIFFERENT root -- the case the old protocol could not
+        // distinguish from a real closure.
+        initiator.promoteToPrimaryRoot();
+        farRoot.promoteToPrimaryRoot();
+        assertNotEquals(initiator.getRobotId(), farRoot.getRobotId(),
                 "scenario error: the two roots must be distinct for this to be defect 2");
+
+        List<TickRecord> records = LatticeHarness.tick(robots, 40);
+
+        // The far root passed the walk on rather than ending it. Nothing else in this
+        // scenario makes robot 3 assign robot 0 -- it is the closing hop of the face.
+        boolean relayedToInitiator = false;
+        for (TickRecord record : records) {
+            if (record.robotId() != farRoot.getRobotId()) {
+                continue;
+            }
+            for (OutgoingMessageRecord sent : record.sent()) {
+                if (sent.messageType().equals("Assignment")
+                        && sent.recipientId() == initiator.getRobotId()) {
+                    relayedToInitiator = true;
+                }
+            }
+        }
+        assertTrue(relayedToInitiator,
+                "root " + farRoot.getRobotId() + " never relayed the walk to its initiator. "
+                        + "Either it certified the three-hop path itself -- defect 2 -- or it "
+                        + "deferred, which is defect 1 wearing the other hat.");
+
+        // And the face really did close, at the robot that minted the certificate.
+        assertTrue(LatticeHarness.anyCycleComplete(records, initiator.getRobotId()),
+                "the walk was relayed but the initiator never marked a corner complete, so the "
+                        + "certificate did not survive the extra hop back");
     }
 
     /**
