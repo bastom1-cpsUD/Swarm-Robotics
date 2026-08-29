@@ -41,6 +41,16 @@ public class CyclebuilderComms extends CommunicationSystem {
     private static final int CLAIM_TTL_PHASES = 2;
 
     private HashMap<Integer, CycleStatus> completedCycles;
+
+    /**
+     * Corners whose neighbour has already been promoted -- see
+     * {@link #promoteAdjacentVerticesToRoots()}.
+     *
+     * <p>Only needed because promotion is now reached repeatedly rather than once. It is not
+     * protocol state: nothing reads it but the promote step, and losing it would cost a
+     * duplicate promotion rather than a wrong one.
+     */
+    private final Set<Integer> announcedCorners = new HashSet<>();
     private final VoltageGraph graph;
 
     // State-Data
@@ -475,9 +485,24 @@ public class CyclebuilderComms extends CommunicationSystem {
                 if (serviced != null) {
                     return serviced;
                 }
-                if(hasFailed()) {
-                    return "N/A (Ceased operations due to failure)";
-                }
+                // NO hasFailed() stand-down here. There used to be one, and it swallowed the
+                // promotion step: a root whose corners end up part complete and part failed
+                // returned "ceased operations" from this line and never reached the
+                // targetEdgeID == -1 branch below, which is the only place
+                // promoteAdjacentVerticesToRoots() is called. So the neighbours standing on the
+                // corners that DID close were never told, and the frontier stopped at a root
+                // that had genuinely built something.
+                //
+                // The dead code below was the fingerprint: the branch that returns "not all
+                // cycles completed... ceasing operations" is written for exactly the
+                // part-failed case, and could not be reached, because nothing between the old
+                // guard and it mutates completedCycles.
+                //
+                // Nothing is needed in its place. hasFailed() means every corner is complete or
+                // failed, so determineNextCycleToComplete() returns -1 on its own and the root
+                // falls through to the promote-then-stand-down branch. The stand-down still
+                // happens, one step later, after it has told its neighbours.
+
                 // ONE face of its own at a time, still. Lifting the cap made a robot able to
                 // carry several walks, and that is the whole of what it was for; it did not
                 // make a root able to BUILD several of its own corners at once, and letting it
@@ -491,11 +516,8 @@ public class CyclebuilderComms extends CommunicationSystem {
                 if (hasInitiatedFaceInFlight()) {
                     return "N/A (Already building a face of my own)";
                 }
-                log("Sending Message...");
-
-                // Find the first outgoing edge that doesn t have a completed cycle yet
+                // Find the first outgoing edge that does not have a completed cycle yet
                 int targetEdgeID = determineNextCycleToComplete();
-
 
                 if (targetEdgeID == -1) {
                     // -1 no longer means "nothing left to do". determineNextCycleToComplete
@@ -505,15 +527,27 @@ public class CyclebuilderComms extends CommunicationSystem {
                     if (!obligations.isEmpty()) {
                         return "N/A (Every remaining cycle is already in flight)";
                     }
-                    promoteAdjacentVerticesToRoots();
+
+                    // Every corner is now settled, one way or the other. Announce the ones that
+                    // closed BEFORE deciding what this failure means for this robot: a corner
+                    // that closed is a real face with a real robot on the far side of it, and
+                    // that robot's right to build outward does not depend on how its neighbour's
+                    // other corners went.
+                    int promoted = promoteAdjacentVerticesToRoots();
+
                     if(!hasFailed()) {
                         promoteSelfToStable();
                         log("-> all cycles completed, promoting self to stable");
                         return "Done (All cycles completed, promoted to stable)";
                     }
 
-                    return "Done (Not all cycles completed, but no valid neighbors for cycle, ceasing operations)";
+                    // Reachable now, which it was not before. A root that stands down here has
+                    // still handed on whatever it built.
+                    return "N/A (Ceased operations due to failure"
+                            + (promoted > 0 ? ", promoted " + promoted + " neighbour(s) first)" : ")");
                 }
+
+                log("Sending Message...");
 
                 HalfEdge targetEdge = retrieveEdgeFromGraph(targetEdgeID);
 
@@ -1815,27 +1849,63 @@ public class CyclebuilderComms extends CommunicationSystem {
         return attempted;
     }
 
+    /**
+     * Gives this robot a corner to track for every edge leaving its role. Run once, at the
+     * moment it becomes a root, and nowhere else.
+     */
     private void initializeEdgeMap() {
         Role myRole = getCurrentRole();
         List<HalfEdge> edges = graph.getOutgoingHalfEdges(myRole);
         for(HalfEdge edge : edges) {
             completedCycles.put(getEdgeIDof(edge), CycleStatus.unattempted);
         }
+        // Nothing has been announced yet, because nothing has closed yet. This is the one
+        // moment a robot starts being a root, so it is the one moment that record starts over.
+        announcedCorners.clear();
     }
 
-    private void promoteAdjacentVerticesToRoots() {
+    /**
+     * Tells the neighbour on each corner this robot closed that it may build outward.
+     *
+     * <p>The only mechanism that extends the frontier, and the only reason a lattice grows
+     * past its first cell.
+     *
+     * <p><strong>Idempotent, which it did not need to be before.</strong> It used to be
+     * reached at most once, on the single activation where a root discovered it had nothing
+     * left to attempt, because a root that had given up stood down before getting here. Now
+     * that a part-failed root reaches this branch every activation, re-sending would be a
+     * message storm -- so each corner is announced once and remembered.
+     *
+     * <p>Never cleared, and nothing needs to clear it: a promoted neighbour becomes a root,
+     * and nothing in this class demotes a root. Re-announcing a corner could therefore only
+     * repeat something already true. {@link #initializeEdgeMap()} resets it, which is the one
+     * moment a robot starts being a root at all.
+     *
+     * <p>The candidate lookup cannot fail. A corner is {@code complete} only because a walk
+     * went out over that edge and came back, which means a robot reached {@code target(edge)};
+     * a settled builder does not leave a site it is standing on; and robots do not fail. So
+     * {@code findBestNeighborForEdge} finds it by exact position, and the null check that
+     * would otherwise belong here would be asserting something the protocol already
+     * guarantees.
+     *
+     * @return how many neighbours were told this time
+     */
+    private int promoteAdjacentVerticesToRoots() {
         Role myRole = getCurrentRole();
         List<HalfEdge> edges = graph.getOutgoingHalfEdges(myRole);
 
+        int promoted = 0;
         for(HalfEdge edge : edges) {
-            if(completedCycles.get(getEdgeIDof(edge)) == CycleStatus.complete) {
+            int edgeId = getEdgeIDof(edge);
+            if(completedCycles.get(edgeId) == CycleStatus.complete && announcedCorners.add(edgeId)) {
                 GeometricCycleLatticeRobot neighbor = findBestNeighborForEdge(edge, null);
-                PromotionMessage pm = new PromotionMessage(self.getRobotId(), neighbor.getRobotId(), getVertexIDof(edge), getEdgeIDof(edge), !hasFailed());
+                PromotionMessage pm = new PromotionMessage(self.getRobotId(), neighbor.getRobotId(), getVertexIDof(edge), edgeId, !hasFailed());
                 send(neighbor, pm);
-                log("-> promoting neighbor on edge " + getEdgeIDof(edge) + " to root");
+                log("-> promoting neighbor on edge " + edgeId + " to root");
+                promoted++;
             }
-            
         }
+        return promoted;
     }
 
     //ASSIGNMENT-RELATED UTIL
@@ -2354,7 +2424,13 @@ public class CyclebuilderComms extends CommunicationSystem {
     public void        setTrustLevel(TrustLevel t) { this.trust = t; }
 
     public CycleStatus getCycleStatusOf(int outgoingEdgeID) { return completedCycles.get(outgoingEdgeID); }
-    public CycleStatus setCycleStatusOf(int outgoingEdgeID, CycleStatus status) { return completedCycles.put(outgoingEdgeID, status);}
+    public CycleStatus setCycleStatusOf(int outgoingEdgeID, CycleStatus status) { 
+        CycleStatus statusToReturn = completedCycles.put(outgoingEdgeID, status);
+        if(role == CycleRole.root && hasFailed()) {
+            promoteAdjacentVerticesToRoots();
+        }
+        return statusToReturn;
+    }
     public void reattemptFailedCycles() {
         for(Entry<Integer, CycleStatus> entry : completedCycles.entrySet()) {
             if(entry.getValue() == CycleStatus.failed) {
