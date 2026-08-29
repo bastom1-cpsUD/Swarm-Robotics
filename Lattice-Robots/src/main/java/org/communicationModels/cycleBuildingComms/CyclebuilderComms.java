@@ -1486,7 +1486,21 @@ public class CyclebuilderComms extends CommunicationSystem {
         // the edge this robot sent out. At the initiator, and only at the initiator, that is
         // the same edge as edgeOwedBy(its tuple); see markCornerFromStatus for why the two
         // spellings must not be confused anywhere else.
+        // The closing hop names the corner before this one in the rotation order, and it is
+        // occupied. The walk is cycleLength long -- checked above -- so the last relayer owed
+        // prev(origin) and that is what it assigned; twin(prev(h)) is sigma^-1(h) by Edmonds'
+        // rule, so this re-arms the corner that neighbours the one just closed, and the robot
+        // that sent this message is standing on it.
+        //
+        // BEFORE the complete-mark, and that ordering is load-bearing. setCycleStatusOf fires
+        // promoteAdjacentVerticesToRoots the moment hasFailed() holds, and announcedCorners
+        // makes an announcement permanent. Marking first would, whenever this closure settles
+        // the last open corner, promote on a failure verdict that the very next line then
+        // overturns -- handing a neighbour rootship while this root still has work.
+        rearmTwinOfIncomingEdge(pm.getAssignedOutgoingEdgeID());
+
         setCycleStatusOf(pm.getOriginOutgoingEdgeID(), CycleStatus.complete);
+
         self.addEdge(new Edge(pm.getRecipient(), pm.getSenderId()));
         forwardSuccessUpstream(pm.getSenderId(), pm.getOriginVertexID(),
                 pm.getOriginOutgoingEdgeID(), cert);
@@ -1570,15 +1584,10 @@ public class CyclebuilderComms extends CommunicationSystem {
                     + "), declining to relay for " + pm.getSenderId());
             return "Positioning Message from " + pm.getSenderId() + " (REJECTED, AT OBLIGATION CAP)";
         }
-
         // A walk arriving over this edge is evidence that a robot occupies the site on the
         // far side of it, so a corner previously written off for want of a candidate is worth
         // re-arming. Kept from the branch this replaces.
-        int outgoingEquivalentID = incomingEdge.getTwin().getId();
-        if (completedCycles.get(outgoingEquivalentID) != null
-                && completedCycles.get(outgoingEquivalentID) != CycleStatus.complete) {
-            setCycleStatusOf(outgoingEquivalentID, CycleStatus.unattempted);
-        }
+        rearmTwinOfIncomingEdge(incomingEdgeId);
 
         // anchorParentID is deliberately NOT set here, for any role. It means "the robot my
         // pose is derived from", which is decided once, on the transition out of unassigned.
@@ -2137,6 +2146,55 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     public int getEdgeIDof(HalfEdge e) {
         return e.getId();
+    }
+
+    /**
+     * Re-arms a corner this robot had written off, on the evidence that somebody is standing
+     * on it after all.
+     *
+     * <p>The argument is an edge a walk <em>arrived</em> over -- {@code assignedOutgoingEdgeID}
+     * on a {@link PositioningMessage}, which is outgoing as the sender named it and incoming
+     * as this robot receives it. Source and target swap across the twin, so
+     * {@code twin(incoming)} is one of <em>this</em> role's outgoing edges, and its target is
+     * the site the sender is standing on. A corner is only ever marked {@code failed} because
+     * {@link #findBestNeighborForEdge} found nobody at its target; the arriving message is
+     * proof that verdict has expired.
+     *
+     * <p><strong>Only {@code failed} is re-armed.</strong> The other two non-complete states
+     * are live bookkeeping and resetting them loses information:
+     * <ul>
+     *   <li>{@code attempted} means "tried, deliberately parked at the back of the queue" --
+     *       set by {@link #routeCertificateLostThroughTuple} so the root works its other
+     *       corners before spinning on one short of candidates, and by
+     *       {@link #collapseCoInitiation} when this robot stands down on a face a
+     *       lower-id robot is already building. {@link #determineNextCycleToComplete()}
+     *       prefers {@code unattempted}, so re-arming would jump the queue in the first case
+     *       and re-launch a walk against the co-initiation winner in the second.</li>
+     *   <li>{@code unattempted} is already armed, so the write is a no-op -- except that
+     *       {@link #setCycleStatusOf} runs the promotion hook on every write, so it is not
+     *       free.</li>
+     * </ul>
+     * A cycleBuilder tracks no corners, so this is a no-op there and needs no role test.
+     *
+     * @param incomingEdgeId the edge the arriving walk was assigned over, from this robot's
+     *                       side; its twin is the corner considered for re-arming
+     */
+    public void rearmTwinOfIncomingEdge(int incomingEdgeId) {
+        HalfEdge incomingEdge = retrieveEdgeFromGraph(incomingEdgeId);
+        if (incomingEdge == null || incomingEdge.getTwin() == null) {
+            // Both call sites establish the edge upstream -- acceptForRelay resolves it, and
+            // the root path has already been through assignmentMatchesCurrentRole, which is
+            // false for an unknown edge. Guarded anyway because this is public and the guard
+            // no longer travels with the callers.
+            return;
+        }
+
+        int outgoingEquivalentID = incomingEdge.getTwin().getId();
+        if (completedCycles.get(outgoingEquivalentID) == CycleStatus.failed) {
+            log("-> a walk arrived over edge " + incomingEdgeId + ", so somebody is standing on "
+                    + "corner " + outgoingEquivalentID + " after all; re-arming it");
+            setCycleStatusOf(outgoingEquivalentID, CycleStatus.unattempted);
+        }
     }
 
     /**

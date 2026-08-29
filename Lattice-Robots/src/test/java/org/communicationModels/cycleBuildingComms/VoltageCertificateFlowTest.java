@@ -70,22 +70,31 @@ class VoltageCertificateFlowTest {
         List<GeometricCycleLatticeRobot> robots =
                 LatticeHarness.placeOnFace(graph, start, new OrientedPoint(0, 0, 0));
 
-        // Exactly one initiator, so the walk runs the whole face rather than terminating
-        // early on a second root the way the defect-2 characterization does.
+        // One robot is seeded as a root; it is not the only root for the whole run. This face
+        // is all the swarm has, so the seed closes one corner and writes the other three off
+        // for want of candidates -- and a part-failed root promotes the neighbours on the
+        // corners it did close. Those become roots, mint certificates of their own, and offer
+        // them straight back here. So "every certificate arriving at robot 0 was minted by
+        // robot 0" is false, and relaying somebody else's walk is exactly what Phase 5 made a
+        // root do (see CycleClosureCharacterizationTest#pathBetweenTwoRootsIsRelayedNotCertified).
+        // The hop arithmetic under test is about the seed's OWN certificate, so select for it.
         GeometricCycleLatticeRobot initiator = robots.get(0);
         initiator.promoteToPrimaryRoot();
 
         List<TickRecord> records = LatticeHarness.tick(robots, 40);
 
         List<VoltageCertificate> returned = certificatesDeliveredTo(records, initiator.getRobotId());
-        assertFalse(returned.isEmpty(),
-                "no certificate came back to the initiator on a " + expectedCycleLength
-                        + "-cycle, so this test is not exercising a full walk");
+        List<VoltageCertificate> ownWalk = returned.stream()
+                .filter(certificate -> certificate.getInitiatorID() == initiator.getRobotId())
+                .toList();
+        assertFalse(ownWalk.isEmpty(),
+                "no certificate minted by the initiator came back to it on a " + expectedCycleLength
+                        + "-cycle, so this test is not exercising a full walk. It did receive "
+                        + returned.size() + " certificate(s), minted by "
+                        + returned.stream().map(VoltageCertificate::getInitiatorID).distinct().toList());
 
         boolean sawFullWalk = false;
-        for (VoltageCertificate certificate : returned) {
-            assertEquals(initiator.getRobotId(), certificate.getInitiatorID(),
-                    "a certificate arriving at the initiator must name it as initiator");
+        for (VoltageCertificate certificate : ownWalk) {
             if (certificate.getHops() == expectedCycleLength - 1) {
                 sawFullWalk = true;
             }
@@ -95,7 +104,7 @@ class VoltageCertificateFlowTest {
                 "expected a certificate back at the initiator carrying "
                         + (expectedCycleLength - 1) + " hops on a " + expectedCycleLength
                         + "-cycle; the initiator contributes the closing hop itself. Saw: "
-                        + returned.stream().map(VoltageCertificate::getHops).toList());
+                        + ownWalk.stream().map(VoltageCertificate::getHops).toList());
     }
 
     @Test
