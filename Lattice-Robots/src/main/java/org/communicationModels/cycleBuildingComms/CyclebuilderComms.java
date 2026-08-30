@@ -972,7 +972,40 @@ public class CyclebuilderComms extends CommunicationSystem {
         if (aParked != bParked) return aParked;
         return aID < bID;
     }
+
     /**
+     * True if {@code a} outranks {@code b} for a contested spot: possession first, then
+     * distance, then id.
+     *
+     * <p>Possession is passed in rather than recovered from the distances. Deriving it as
+     * {@code isZero(dist)} works for whichever robot is asking -- its own claim is a vector
+     * from itself, so zero length is literally "I am standing on it" -- and fails for the
+     * rival, whose possession has to come off the claim in its <em>sender's</em> frame; see
+     * {@link #isParked}. It also could not express "both parked", because a zero-length
+     * {@code distA} would answer before {@code distB} was looked at, and both robots would
+     * claim possession and neither would yield. That case is the whole reason rule 3 exists.
+     *
+     * <p>Both distances must be measured the same way -- each robot to its <em>own</em>
+     * declared target -- or the predicate is not symmetric and the pair can both yield or
+     * neither. {@link #detectAssignmentContention} reads the rival's from the claim it
+     * broadcast, so the two robots compare the identical pair of scalars and
+     * {@code Double.compare} is an exact, agreed test rather than a brittle one.
+     */
+    protected boolean outranks(boolean aParked, double distA, int idA,
+                               boolean bParked, double distB, int idB) {
+        // 1. Whoever is already standing on the spot keeps it.
+        if (aParked != bParked) {
+            return aParked;
+        }
+        // 2. Otherwise whoever has less ground left to cover.
+        int byDistance = Double.compare(distA, distB);
+        if (byDistance != 0) {
+            return byDistance < 0;
+        }
+        // 3. Equidistant -- including both parked -- goes to the lower id.
+        return idA < idB;
+    }
+    /** 
      * Whether a claim declares its sender already standing on the spot it claims.
      *
      * <p>Must be handed the claim in its <em>sender's own</em> frame -- the form it is
@@ -1007,13 +1040,26 @@ public class CyclebuilderComms extends CommunicationSystem {
      * test the other's trajectory against a <em>different</em> target, so both could
      * yield, or neither.
      *
-     * <p>That tie-break is a total order over {@code (parked, id)} -- see
-     * {@link #outranks(boolean, int, boolean, int)}. Possession comes first because id
-     * alone has no notion of who is already there: an arrived robot holding the higher id
-     * would tear itself down, rejecting to its parent and dropping its subtree, in favour
-     * of an interloper that had not got there yet. Possession is read off a claim
-     * <em>before</em> it is transformed into this frame, via {@link #isParked}, for the
-     * reason given there.
+     * <p>That tie-break is a total order over {@code (parked, distance, id)} -- see
+     * {@link #outranks(boolean, double, int, boolean, double, int)}. Possession comes first
+     * because neither of the others has any notion of who is already there: an arrived robot
+     * that is merely further along its own approach, or holds the higher id, would tear
+     * itself down -- rejecting to its parent and dropping its subtree -- in favour of an
+     * interloper that had not got there yet. Distance comes next so the robot with less
+     * ground to cover finishes the spot instead of two robots trading it. Id is last, and
+     * settles the genuinely undecidable cases: equidistant rivals, and two robots both
+     * standing on the spot.
+     *
+     * <p><strong>Every input to that order is read off the claims, never off an
+     * observation.</strong> Possession comes from the claim <em>before</em> it is transformed
+     * into this frame, via {@link #isParked}, for the reason given there; the rival's
+     * distance is the length of that same untransformed claim, which is the rival's distance
+     * to its own target as the rival itself computed it. So both robots rank the identical
+     * pair of scalars and reach opposite verdicts, which is what makes exactly one of them
+     * yield. Measuring the rival against <em>this</em> robot's claim point instead would rank
+     * the pair against two reference points up to gamma apart, and they could both yield or
+     * neither. Observation decides only <em>whether</em> the two are contending, via the
+     * bounding-circle test.
      *
      * <p>Symmetry is a property of the steady state, not of any single tick. In the first
      * tick after an assignment lands, whichever robot activates earlier may not have
@@ -1040,7 +1086,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         if (myClaim == null) {
             return null;
         }
-
+        double myDistance = Vec2.of(myClaim).magnitude();
         boolean iAmParked = isParked(myClaim);
 
         // The maximum possible distance a robot can move in one tick; radius of the "contention zone" around a lattice spot. If two robots individual
@@ -1052,9 +1098,13 @@ public class CyclebuilderComms extends CommunicationSystem {
         double gamma = GeometricCycleLatticeRobot.tickTravel();
 
         // Resolve against the strongest rival rather than the first one found: iteration
-        // order over the claim map must not decide who keeps the assignment. "Strongest"
-        // is parked-before-moving, then lowest id.
+        // order over the claim map must not decide who keeps the assignment. "Strongest" is
+        // the same order the verdict itself uses -- parked, then nearer, then lower id -- so
+        // that the rival selected is the one this robot would actually lose to. Ranking
+        // rivals on a different order than the one that decides could pick a near, moving
+        // rival over a parked one and hand back a KEPT on a spot somebody is standing on.
         int bestRivalID = -1;
+        double bestRivalDistance = -1;
         boolean bestRivalParked = false;
         for (ClaimEntry entry : incomingClaims.values()) {
             int senderID = entry.claim().getSenderId();
@@ -1077,14 +1127,31 @@ public class CyclebuilderComms extends CommunicationSystem {
                 continue;
             }
 
+            // The rival's own distance to its own target, read straight off the claim in the
+            // frame it was broadcast in -- NOT the observed gap between where this robot sees
+            // the rival and where this robot's target is.
+            //
+            // Two reasons, and both are about symmetry. First, the observed version would
+            // measure everyone against MY claim point, while the rival measures everyone
+            // against ITS claim point; the two differ by up to gamma, so the pair can rank
+            // each other in opposite orders and either both yield or neither does. Read off
+            // the claim, both robots compare the identical pair of scalars. Second, a claim
+            // is exact where an observation is not: the rival computed this distance from its
+            // own pose, so no sensing error enters the ranking at all. Observation still
+            // decides WHETHER the two are contending, via the bounding circle above; it no
+            // longer decides who wins.
+            double theirDistance = Vec2.of(claimInSenderFrame).magnitude();
+
             // Read off the claim as it arrived, before the frame change above -- see
             // isParked. The rival is a genuine contender for this spot either way; this
             // only decides which of us gives it up.
             boolean rivalParked = isParked(claimInSenderFrame);
 
-            if (bestRivalID == -1 || outranks(rivalParked, senderID, bestRivalParked, bestRivalID)) {
+            if (bestRivalID == -1 || outranks(rivalParked, theirDistance, senderID,
+                                              bestRivalParked, bestRivalDistance, bestRivalID)) {
                 bestRivalID = senderID;
                 bestRivalParked = rivalParked;
+                bestRivalDistance = theirDistance;
             }
         }
 
@@ -1092,13 +1159,28 @@ public class CyclebuilderComms extends CommunicationSystem {
             return null;
         }
 
-        if (!outranks(bestRivalParked, bestRivalID, iAmParked, self.getRobotId())) {
-            boolean heldByPossession = iAmParked && !bestRivalParked;
-            log("-> Contention with robot " + bestRivalID + " over my assignment. "
-                    + (heldByPossession ? "I am already parked on it" : "I hold the lower id")
+        // iAmParked and bestRivalParked are handed to the predicate rather than left for it
+        // to infer. They used to be computed here and then used only to word the log line,
+        // while the decision re-derived possession as isZero(distance) -- which is right for
+        // this robot and wrong for the rival, whose possession only survives transport when
+        // it is read in the sender's own frame. A parked rival therefore read as merely
+        // nearby, and this robot would keep the spot and drive onto it.
+        // Keep the spot when this robot OUTRANKS the rival. The test used to be negated --
+        // "keep it when I do not outrank" -- which handed the spot to whichever robot was
+        // further away, or held the higher id, and the log lines underneath said the
+        // opposite of what the branch had actually decided. It survived because the one test
+        // covering it put the lower id further from the target, so distance and id disagreed
+        // and the inverted answer read as the right one.
+        if (outranks(iAmParked, myDistance, self.getRobotId(),
+                     bestRivalParked, bestRivalDistance, bestRivalID)) {
+            String why = iAmParked && !bestRivalParked ? "I am already parked on it"
+                    : myDistance < bestRivalDistance ? "I am closer to it"
+                    : "I hold the lower id";
+            log("-> Contention with robot " + bestRivalID + " over my assignment. " + why
                     + "; keeping it.");
-            return "Assignment contention with robot " + bestRivalID
-                    + (heldByPossession ? " (KEPT, parked)" : " (KEPT, lower id)");
+            return "Assignment contention with robot " + bestRivalID + " (KEPT, "
+                    + (iAmParked && !bestRivalParked ? "parked"
+                       : myDistance < bestRivalDistance ? "closer" : "lower id") + ")";
         }
 
         // Not retryable: this robot genuinely cannot take this spot, so the parent should
@@ -1110,11 +1192,14 @@ public class CyclebuilderComms extends CommunicationSystem {
         hasBeenAssigned = false;
         self.clearEdges();
         boolean lostToPossession = bestRivalParked && !iAmParked;
-        log("-> Contention with robot " + bestRivalID + " over my assignment. "
-                + (lostToPossession ? "It is already parked there" : "I hold the higher id")
+        String why = lostToPossession ? "It is already parked there"
+                : bestRivalDistance < myDistance ? "It is closer to it"
+                : "I hold the higher id";
+        log("-> Contention with robot " + bestRivalID + " over my assignment. " + why
                 + "; yielding and forwarding rejection to parent.");
-        return "Assignment contention with robot " + bestRivalID
-                + (lostToPossession ? " (YIELDED, rival parked)" : " (YIELDED, higher id)");
+        return "Assignment contention with robot " + bestRivalID + " (YIELDED, "
+                + (lostToPossession ? "rival parked"
+                   : bestRivalDistance < myDistance ? "rival closer" : "higher id") + ")";
     }
 
     /*
