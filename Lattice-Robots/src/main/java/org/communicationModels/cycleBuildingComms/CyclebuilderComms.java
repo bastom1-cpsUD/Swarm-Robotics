@@ -271,7 +271,48 @@ public class CyclebuilderComms extends CommunicationSystem {
             return "N/A (EMPTY)";
         }
 
-        // Nothing gates the inbox any more.
+        // A robot still driving to its site answers nothing, and that is about honesty rather
+        // than courtesy. Every question an assignment asks -- checkAssignmentForCurrentPosition
+        // -- is answered against where this robot is RIGHT NOW, and a moving robot's answer
+        // describes a pose it is about to leave. Worse, that answer is permanent: every
+        // rejection in the assignment path is non-retryable, so the offerer writes this robot
+        // onto that face's ban list, FaceObligation never lifts a ban, and the offerer works
+        // down its neighbours until it runs out and kills the face. A robot that was merely
+        // EARLY is written off for the life of the face and can take the face with it.
+        //
+        // Nothing is polled, so nothing is consumed and no budget is spent: the offer stays
+        // queued exactly as it arrived, and is answered once the answer means something.
+        //
+        // This is a deferral, and the two things that make it safe where the old ones were not:
+        //
+        //   1. The offerer is not blocked. Its child slot is filled, so findUnfulfilled()
+        //      rotates past that tuple and serves its other faces -- which is what the tuple
+        //      set exists for. Only that one face waits.
+        //   2. It is bounded at both ends. ARRIVAL releases it; and a robot that never arrives
+        //      descends the liveness ladder, resetToUnassigned() drops its obligations, and the
+        //      still-queued offer is then answered by an UNASSIGNED robot, which accepts it.
+        //
+        // What this does NOT suppress is the part that matters: TargetClaimMessage never enters
+        // incomingMessages -- it arrives through receiveClaim into incomingClaims -- and
+        // executeTimeStep runs detectAssignmentContention, consumeStandAside,
+        // applyAvoidanceWaypoint, applyLivenessGiveUp and broadcastTargetClaim OUTSIDE this
+        // method. A travelling robot still yields on contention, still evades, still gives up a
+        // site it cannot reach, and still claims its target. That is what makes the gate safe
+        // HERE, and the first thing to re-check if it ever moves.
+        //
+        // Costs one tick on release: hasArrived latches in sendMessage, which executeTimeStep
+        // runs after this method, so the answer comes on the following activation. Already the
+        // documented behaviour for promotions -- see acceptPromotion and
+        // PromotionTest.promotionInTransitIsDeferredThenAccepted.
+        //
+        // Not gated: a robot picked by findBestNeighborForEdge's exact-position branch is
+        // already standing on its site, so updateAssignedPosition() returns true on its first
+        // activation as a cycleBuilder and hasArrived latches in the same tick.
+        if (role == CycleRole.cycleBuilder && !hasArrived) {
+            return "N/A (In transit, answering nothing until I am standing still)";
+        }
+
+        // Nothing else gates the inbox.
         //
         // Phase 5 let an OUTSTANDING obligation take the whole tick, on the reasoning that a
         // robot owing an offer should make it before listening to anything else. That was
@@ -2084,6 +2125,15 @@ public class CyclebuilderComms extends CommunicationSystem {
             // HexagonSquareTriangle, DodecagonHexagonSquare, ElongatedTriangular). Nothing
             // gates the inbox now, so a busy robot answers an offer it should decline instead
             // of rotating it unread, and the round trip above completes.
+            // The ban check stays AHEAD of the exact-position match, and that ordering was
+            // tried the other way round and reverted. Letting "this robot is standing on the
+            // target" override its ban sounds right -- a ban is a claim from several ticks ago
+            // and the observation is a measurement of now -- but it removes the only thing
+            // bounding the offer loop. A robot on the target that still refuses for a reason
+            // that is not about position (wrong role, a co-initiation stand-down, an obligation
+            // it already owes) is re-offered the same edge every activation, refuses every
+            // activation, and neither side ever moves on. The ban is what makes an offer
+            // sequence finite; the evidence has to arrive some other way.
             if (robotID != parentID && !isBannedOn(obligation, robotID)) {
                 // A neighbor already sitting exactly at the target position must win outright,
                 // and before the wedge test runs: that test's
@@ -2491,18 +2541,16 @@ public class CyclebuilderComms extends CommunicationSystem {
      * none of the carried state is about that.
      */
     private String acceptPromotion(PromotionMessage pm) {
-        // A robot still driving toward its site must not become an anchor. A root's
+        // The in-transit deferral that used to stand here is gone, absorbed by the gate at the
+        // top of processMessages -- a cycleBuilder that has not arrived reaches no branch of
+        // this switch at all, so the guard became unreachable rather than merely redundant.
+        //
+        // The hazard it existed for is real and is now covered more cheaply: a robot still
+        // driving toward its site must not become an anchor, because a root's
         // getAssignedGlobalPosition short-circuits to its own pose, so promoting mid-journey
-        // makes wherever it happens to be standing into its lattice site -- it stops moving,
-        // and every child it later places is offset from the real lattice. Deferring is safe
-        // here in a way the old blanket deferral was not: arrival releases it, and a robot
-        // that never arrives gives its assignment up on the liveness ladder and becomes
-        // unassigned, which releases it too.
-        if (role == CycleRole.cycleBuilder && !hasArrived) {
-            incomingMessages.add(pm);
-            log("-> promotion from " + pm.getSenderId() + " deferred: still travelling to my site");
-            return "Promotion Message from " + pm.getSenderId() + "(DEFERRED, IN TRANSIT)";
-        }
+        // would make wherever it happens to be standing into its lattice site -- it stops
+        // seeking, and every child it later places is offset from the real lattice. The gate
+        // keeps the promotion queued, unread and uncounted, until arrival.
 
         // "Already a root" asked as the thing it actually means. Tracking corners IS what
         // being a root is -- initializeEdgeMap is what makes one -- so this reads the state

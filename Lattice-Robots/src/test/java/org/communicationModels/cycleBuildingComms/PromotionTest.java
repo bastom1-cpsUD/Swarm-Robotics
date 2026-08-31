@@ -174,9 +174,17 @@ class PromotionTest {
         assertEquals(CycleRole.cycleBuilder, afterPromotion.after().role(),
                 "a robot promoted mid-journey became a root and froze off-lattice: its pose is "
                         + "now its declared site. It must wait until it has arrived.");
-        assertTrue(afterPromotion.processedDescription().contains("DEFERRED"),
-                "expected the promotion to be deferred while in transit, got: "
-                        + afterPromotion.processedDescription());
+
+        // Asserted structurally rather than on the description, because the deferral moved:
+        // acceptPromotion used to re-queue this itself, and Phase 9 absorbed that into the
+        // in-transit gate at the top of processMessages, which never dispatches far enough to
+        // reach the promotion branch. What must remain true either way is that the message is
+        // still sitting in the inbox, unconsumed.
+        boolean stillQueued = afterPromotion.after().queueInOrder().stream()
+                .anyMatch(message -> message instanceof PromotionMessage);
+        assertTrue(stillQueued,
+                "the promotion was consumed while the robot was in transit rather than left "
+                        + "queued. Processed: " + afterPromotion.processedDescription());
 
         // And it is a real deferral, not a black hole. Arrival is what releases it, so put the
         // robot on its site -- placement is this harness's stand-in for driving, which is why
