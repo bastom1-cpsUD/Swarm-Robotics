@@ -398,12 +398,23 @@ class DuplicateCertificateRaceTest {
     @Test
     @DisplayName("a refusal from an unlinked robot drops the edge to it")
     void aRefusalFromAnUnlinkedRobotDropsTheEdge() {
-        List<GeometricCycleLatticeRobot> robots = neighbourhood();
-        GeometricCycleLatticeRobot seed = robots.get(0);
+        // A lone root and one robot loitering at a pose that is NOT a lattice site of the root --
+        // 25 units out on the diagonal, where the square lattice's neighbours sit at 70 along the
+        // axes. That distinction is the whole test: placeAroundRole cannot be used here, because
+        // every robot in it stands on one of the seed's sites and so is a genuine neighbour whose
+        // edge must survive a refusal.
+        GeometricCycleLatticeRobot seed =
+                new GeometricCycleLatticeRobot(0, new OrientedPoint(0, 0, 0), SQUARE);
+        GeometricCycleLatticeRobot passerBy =
+                new GeometricCycleLatticeRobot(1, new OrientedPoint(25, 15, 0), SQUARE);
+        LatticeHarness.makeAllNeighbors(List.of(seed, passerBy));
+        seed.promoteToPrimaryRoot();
 
         FaceObligation attempt = attemptInFlight(seed);
         assertNotNull(attempt, "scenario error: the seed never got a walk of its own in flight");
         int refuser = attempt.getChildId();
+        assertEquals(passerBy.getRobotId(), refuser,
+                "scenario error: the only candidate should have been the loitering robot");
         assertTrue(hasEdgeTo(seed, refuser), "scenario error: the offer should have drawn an edge");
 
         seed.enqueueMessage(new RejectAssignmentMessage(refuser, seed.getRobotId(),
@@ -412,9 +423,51 @@ class DuplicateCertificateRaceTest {
         seed.executeTimeStep(1.0, 100);
 
         assertFalse(hasEdgeTo(seed, refuser),
-                "the edge to robot " + refuser + " survived a refusal, and nothing but the "
-                        + "transient attempt ever connected the two. An attempt that ends leaves "
-                        + "no claim behind it.");
+                "the edge to robot " + refuser + " survived a refusal, though it holds no link with "
+                        + "this robot and is not standing on any of its lattice sites. Nothing but "
+                        + "the transient attempt ever connected the two, and an attempt that ends "
+                        + "leaves no claim behind it.");
+    }
+
+    /**
+     * The reported case: a root must not lose the edge to a robot <em>it placed itself</em>.
+     *
+     * <p>The root opens a corner nobody occupies, so candidate selection falls through to nearest
+     * and the site goes to a robot that accepts it. That robot arrives and then dead-ends, because
+     * there is no one beyond it; the walk fails and the root clears its attempt. The root opens its
+     * <em>next</em> corner, picks the same robot again -- still the nearest thing it can see -- and
+     * is correctly refused, because that robot is standing on the first corner, not the second.
+     *
+     * <p>A carried link cannot vouch for it. Links are created when a walk <em>arrives</em>, and the
+     * root is the one that sent, so no link at the root ever names the robot it placed. The only
+     * record was the attempt, and the attempt is gone by then. Without
+     * {@code occupiesAdjacentSite} the edge is deleted between two robots that are lattice
+     * neighbours and know it.
+     */
+    @Test
+    @DisplayName("a root keeps the edge to a robot it placed, even after that walk dead-ends")
+    void aRootKeepsTheEdgeToTheRobotItPlaced() {
+        // The root, one robot standing exactly on one of its corners, and nothing beyond -- so any
+        // walk over that corner has nowhere to go and must dead-end.
+        GeometricCycleLatticeRobot seed =
+                new GeometricCycleLatticeRobot(0, new OrientedPoint(0, 0, 0), SQUARE);
+        HalfEdge placedCorner = SQUARE.getOutgoingHalfEdges(SQUARE.getPrimaryRole()).get(0);
+        OrientedPoint site = new RigidBodyTransformation(seed.getPosition())
+                .compose(placedCorner.getVoltage()).asPose();
+        GeometricCycleLatticeRobot placed = new GeometricCycleLatticeRobot(1, site, SQUARE);
+        LatticeHarness.makeAllNeighbors(List.of(seed, placed));
+        seed.promoteToPrimaryRoot();
+
+        // Run both robots so the placed one actually relays, dead-ends, and reports back.
+        List<GeometricCycleLatticeRobot> both = List.of(seed, placed);
+        LatticeHarness.tick(both, 60);
+
+        assertTrue(hasEdgeTo(seed, placed.getRobotId()),
+                "the root deleted its edge to robot " + placed.getRobotId() + ", the robot standing "
+                        + "on its own corner and the one it placed there. No carried link names a "
+                        + "robot this root assigned -- links record walks that ARRIVE -- so once "
+                        + "the attempt cleared, only the fact that it is sitting on an adjacent "
+                        + "lattice site says the two are still neighbours.");
     }
 
     /**

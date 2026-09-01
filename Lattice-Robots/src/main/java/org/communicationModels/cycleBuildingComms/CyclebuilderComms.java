@@ -2496,8 +2496,52 @@ public class CyclebuilderComms extends CommunicationSystem {
             log("-> keeping the edge to " + otherRobotId + ": a permanent link still connects us");
             return;
         }
+        if (occupiesAdjacentSite(otherRobotId)) {
+            log("-> keeping the edge to " + otherRobotId + ": it is standing on one of my lattice sites");
+            return;
+        }
         self.getEdges().removeIf(edge -> edge.getFromId() == self.getRobotId()
                 && edge.getToId() == otherRobotId);
+    }
+
+    /**
+     * Whether that robot is observed standing exactly on one of this site's lattice neighbours.
+     *
+     * <p><strong>The case a carried link cannot express.</strong> A link is
+     * {@code (parent, incoming edge) -> child}, and it is created when a walk <em>arrives</em> --
+     * so a root that <em>placed</em> a robot has no link naming it, because the root is the one who
+     * sent. That relationship is recorded only in the attempt tuple, which is transient by design
+     * and cleared the moment the walk resolves. A root whose walk then dead-ends, offers its next
+     * corner to that same robot (still the nearest candidate), and is correctly refused, would find
+     * nothing vouching for a neighbour it put there itself, and delete the edge.
+     *
+     * <p>So the fact is asked directly instead of inferred from message history: standing on
+     * {@code target(e)} for one of this role's outgoing edges <em>is</em> lattice adjacency,
+     * whether the face closed, failed, or is still in flight.
+     *
+     * <p>Kept alongside {@link FaceObligationSet#isPermanentlyLinkedTo} rather than replacing it,
+     * because the two fail in opposite directions: this one answers false for a neighbour that is
+     * momentarily unobservable, and that one answers false for a robot this one placed. Either
+     * alone still deletes edges that should live.
+     *
+     * <p>Not expressed via {@link #findNeighborStandingOn}: that scans every observation per edge
+     * and returns a robot, where this asks about one known robot and wants a boolean. Both use the
+     * same {@code MathUtils.EPSILON} match, so "standing on it" means one thing throughout.
+     */
+    private boolean occupiesAdjacentSite(int robotId) {
+        Observation observed = observations.get(robotId);
+        Role myRole = getCurrentRole();
+        if (observed == null || myRole == null) {
+            return false;
+        }
+        for (HalfEdge outgoing : graph.getOutgoingHalfEdges(myRole)) {
+            if (MathUtils.isZero(
+                    getTargetInLocalCoordinates(outgoing).distance(observed.getLocalPosition()),
+                    MathUtils.EPSILON)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** A null obligation means no exclusions -- see {@link #findBestNeighborForEdge}. */
