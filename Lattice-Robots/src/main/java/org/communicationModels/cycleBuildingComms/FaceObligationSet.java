@@ -162,6 +162,31 @@ public class FaceObligationSet {
         return carried.size();
     }
 
+    /**
+     * Whether a <strong>permanent</strong> link connects this robot to that one, in either
+     * direction -- as the parent that hands walks down, or as the child that carries them on.
+     *
+     * <p>Exists so that giving up on one offer does not tear down a connection that is real. A
+     * drawn edge is a claim about topology, so whether to remove it is a question about topology
+     * and not about which code path happened to draw it: a robot that refuses a site it cannot take
+     * may still be the neighbour this robot has been relaying through all along.
+     *
+     * <p><strong>Carried links only, and the attempt is excluded by construction.</strong> The
+     * attempt is transient -- opened when a root picks a corner, dropped when that corner's status
+     * comes home -- so a robot connected to this one <em>only</em> by an attempt is connected by
+     * nothing that outlives the walk. Answering that here rather than in the caller is the point:
+     * {@link #carried} stays private and no call site can forget to filter the attempt out, the
+     * same reason {@link #getOrCreate} enforces one-tuple-per-edge here instead of at its callers.
+     */
+    public boolean isPermanentlyLinkedTo(int robotId) {
+        for (FaceObligation link : carried) {
+            if (link.getParentId() == robotId || link.matchesChild(robotId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /*
         ////////////////////////
         THIS ROBOT'S OWN FACE

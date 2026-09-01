@@ -327,6 +327,19 @@ public class CyclebuilderComms extends CommunicationSystem {
             return "N/A (EMPTY)";
         }
 
+        // A message from a robot that has drifted out of observation range is dropped, and nothing
+        // is done to recover it. That is not a hole, and it deliberately has no timeout behind it:
+        // loss of contact is detected from BOTH ends, and the other end is the one that can act.
+        //
+        // Whatever this message was, the robot that sent it is a parent or a child of some walk.
+        // The parent side notices independently -- collectDepartedChildren sweeps every link whose
+        // child is no longer observable, releases the binding, and raises a CertificateLostMessage
+        // addressed to that walk's initiator, which is the only robot able to mint a replacement.
+        // So the face is relaunched by the one participant with the standing to relaunch it, and a
+        // recovery path here would be a second mechanism racing the first.
+        //
+        // Measured at 3 drops in a 600-tick, 20-robot run, all of them robots moving apart while a
+        // message was in flight.
         if(!validateSenderIsNeighbor(next.getSenderId())) {
             log("-> sender " + next.getSenderId() + " is not a neighbor, discarding message");
             return "N/A (Discarded message from non-neighbor " + next.getSenderId() + ")";
@@ -448,7 +461,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         // Set here and nowhere else: this is the only transition that decides which robot this one
         // is anchored to. See the anchorParentID javadoc.
         anchorParentID = pm.getSenderId();
-        drawEdgeOnce(self.getRobotId(), anchorParentID);
+        self.addEdge(new Edge(self.getRobotId(), anchorParentID));
         holdInCustody(pm, pm.getSenderId(), pm.getAssignedOutgoingEdgeID());
         log("-> became cycleBuilder: edge id=" + getAssignedEdge().getId()
                 + " from vertex " + getAssignedEdge().getOrigin().getId()
@@ -662,7 +675,9 @@ public class CyclebuilderComms extends CommunicationSystem {
         // face passing through a settled robot must not re-point either. The face's parent lives on
         // the tuple, which is where it has to live once several walks are in flight anyway.
         FaceObligation tuple = obligations.getOrCreate(pm.getSenderId(), incomingEdgeId);
-        drawEdgeOnce(pm.getRecipient(), pm.getSenderId());
+        // Runs on every walk over this link, not once per link, and that is fine: addEdge is a
+        // set-add, now that Edge has value equality.
+        self.addEdge(new Edge(pm.getRecipient(), pm.getSenderId()));
 
         HalfEdge owed = edgeOwedBy(tuple);
         if (owed == null) {
@@ -759,12 +774,11 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     /**
-     * Sends one assignment along a link, drawing the link's edge if it is not already drawn.
+     * Sends one assignment along a link, binding the child and drawing the edge for it.
      *
-     * <p>The draw is conditional now that links persist. A tuple that already names this child has
-     * its edge on screen from the first walk that used it; redrawing on every subsequent walk would
-     * stack duplicate {@link Edge} objects on the robot, and {@code undrawChildEdge} removes by
-     * reference, so only the newest would ever come off.
+     * <p>Both are unconditional and both are idempotent, which is what lets this run on every
+     * certificate rather than once per link: {@code fulfil} writes an id, and {@code addEdge} is a
+     * set-add because {@link Edge} carries value equality.
      */
     private void offer(FaceObligation obligation, GeometricCycleLatticeRobot child,
                        HalfEdge targetEdge, int loggedEdgeId,
@@ -774,11 +788,8 @@ public class CyclebuilderComms extends CommunicationSystem {
                 originVertexID, originEdgeID, cert);
         send(child, pm);
         obligation.setInFlightInitiator(cert.getInitiatorID());
-        if (!obligation.matchesChild(child.getRobotId()) || obligation.getChildEdge() == null) {
-            Edge drawn = new Edge(self.getRobotId(), child.getRobotId());
-            self.addEdge(drawn);
-            obligation.fulfil(child.getRobotId(), drawn);
-        }
+        obligation.fulfil(child.getRobotId());
+        self.addEdge(new Edge(self.getRobotId(), child.getRobotId()));
         if (VERBOSE) {
             log("Message sent to " + child.getRobotId() + " for edge " + loggedEdgeId);
         }
@@ -1455,7 +1466,11 @@ public class CyclebuilderComms extends CommunicationSystem {
             return "Reject Assignment Message from " + rm.getSenderId() + "(NO MATCHING OBLIGATION)";
         }
 
-        undrawChildEdge(tuple.release());
+        // Read the child before releasing it -- release() is what clears the slot the undraw needs
+        // to ask about.
+        int refuser = rm.getSenderId();
+        tuple.release();
+        undrawEdgeTo(refuser);
 
         if (rm.isRetryable()) {
             // No ban: the rejecter said "not now", and it has left the target site, so
@@ -1619,8 +1634,10 @@ public class CyclebuilderComms extends CommunicationSystem {
      */
     private void forwardRejectionToParent(boolean isRetryable) {
         for (FaceObligation obligation : obligations.drainForVacate()) {
-            // The drawn edges describe a site this robot is leaving.
-            undrawChildEdge(obligation.getChildEdge());
+            // The drawn edges describe a site this robot is leaving, so all of them go. That falls
+            // out of the predicate rather than needing an exception: drainForVacate has already
+            // emptied both containers, so nothing is permanently linked to anything any more.
+            undrawEdgeTo(obligation.getChildId() == null ? -1 : obligation.getChildId());
 
             PositioningMessage held = takeCustody(obligation);
             if (isInitiatedFace(obligation)) {
@@ -1762,7 +1779,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         // overturned it.
         rearmTwinOfIncomingEdge(pm.getAssignedOutgoingEdgeID());
 
-        drawEdgeOnce(pm.getRecipient(), pm.getSenderId());
+        self.addEdge(new Edge(pm.getRecipient(), pm.getSenderId()));
         forwardSuccessUpstream(pm.getSenderId(), pm.getOriginVertexID(),
                 pm.getOriginOutgoingEdgeID(), cert);
         log("-> own certificate returned after " + walkLength + " hops on a " + cycleLength
@@ -1829,7 +1846,10 @@ public class CyclebuilderComms extends CommunicationSystem {
     private String reportRelayFailure(FaceObligation tuple, VoltageCertificate cert,
                                       int originVertexID, int originEdgeID) {
         int parentId = tuple.getParentId();
-        undrawChildEdge(tuple.release());
+        // Child read before release, which is what clears the slot the undraw asks about.
+        int deadEnd = tuple.getChildId() == null ? -1 : tuple.getChildId();
+        tuple.release();
+        undrawEdgeTo(deadEnd);
         // The walk is over, so its exclusions go with it. Failing is a resolution like any other,
         // and a link that kept the bans it accumulated on the way to a dead end would carry them
         // for the rest of the robot's life -- eventually hiding whoever settles onto the site it
@@ -1941,12 +1961,19 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     /**
-     * Gives this robot a corner to track for every edge leaving its role. Run once, at the
-     * moment it becomes a root, and nowhere else.
+     * Gives this robot a corner to track for every edge leaving its role, <em>and no others</em>.
+     * Run once, at the moment it becomes a root, and nowhere else.
+     *
+     * <p>Clears before it fills, which it did not used to. Adding one entry per outgoing edge
+     * without removing anything cannot establish the postcondition the name claims: a robot
+     * arriving here with keys from a different role would keep them, and on a multi-role lattice
+     * those are corners of somebody else's site. Clearing makes the map mean "the corners of where
+     * I am standing" by construction, which is the invariant {@link #setCycleStatusOf} now guards.
      */
     private void initializeEdgeMap() {
         Role myRole = getCurrentRole();
         List<HalfEdge> edges = graph.getOutgoingHalfEdges(myRole);
+        completedCycles.clear();
         for(HalfEdge edge : edges) {
             completedCycles.put(getEdgeIDof(edge), CycleStatus.unattempted);
         }
@@ -2370,10 +2397,18 @@ public class CyclebuilderComms extends CommunicationSystem {
             // and its parent have not moved, so the link between them is as true as it was, and
             // the bans it carries are still the right exclusions for the next candidate. An
             // attempt is a different matter: it is transient by design and is cleared below.
-            undrawChildEdge(obligation.release());
+            //
+            // ORDER IS LOAD-BEARING. The release has to happen BEFORE the undraw: it is what stops
+            // this link naming the departed robot as its child, and therefore what lets
+            // isPermanentlyLinkedTo answer "no" and the edge actually go. Undraw first and every
+            // robot that ever wandered off keeps its line forever, because the link it left behind
+            // still vouches for it.
+            int departedChild = obligation.getChildId() == null ? -1 : obligation.getChildId();
+            obligation.release();
             if (obligations.isAttempt(obligation)) {
                 obligations.clearAttempt();
             }
+            undrawEdgeTo(departedChild);
         }
     }
 
@@ -2427,41 +2462,42 @@ public class CyclebuilderComms extends CommunicationSystem {
     }
 
     /**
-     * Draws the visualization edge back to a robot, unless one is already drawn between the two.
+     * Undraws the edge toward a robot, <strong>unless a permanent link still connects them</strong>.
      *
-     * <p>Needed because links are permanent and carry many walks. The three places that draw an
-     * edge toward a <em>parent</em> -- accepting a first assignment, relaying, and closing a face --
-     * used to run about once per walk, when a tuple lived and died with one. They now run on every
-     * certificate that crosses the link, and {@link Edge} has no value equality, so each call added
-     * another object to the robot's list: an unbounded pile of identical overlapping lines behind a
-     * long run.
+     * <p>A drawn edge is a claim about topology, so whether to remove one is a question about
+     * topology -- not about which code path drew it. Keep it while
+     * {@link FaceObligationSet#isPermanentlyLinkedTo} holds, and drop it when the only thing that
+     * ever connected the two was a transient attempt, or nothing at all. That single test gives
+     * every case: a child that wandered off loses its edge (the sweep releases its link first, so
+     * the predicate is already false), a robot that refuses a site it could never take loses its
+     * edge, a robot reached across a long comm range loses its edge -- and a settled neighbour that
+     * refuses a futile offer <em>keeps</em> its edge, because the two of them have been relaying for
+     * each other all along.
      *
-     * <p>Deliberately not used by {@link #offer}. A child edge is removed <em>by reference</em>
-     * later, so it has to be the object the obligation is holding; deduplicating there would leave
-     * a tuple with a null edge it could never undraw. {@code offer} guards itself instead, by only
-     * drawing when the child actually changes.
+     * <p><strong>Keyed on the robot, not on an {@link Edge} object, and that is the fix.</strong>
+     * This used to take the exact instance an obligation had drawn and remove it by reference,
+     * which was right while duplicates existed. Giving {@code Edge} value equality made
+     * {@code addEdge} deduplicate -- so {@code offer}'s freshly built instance is discarded when a
+     * real link already drew that pair, the obligation stores the discarded object, and removing it
+     * matched the surviving good edge by value and deleted that instead. A root refusing a
+     * neighbour's futile offer erased a connection both of them were still using.
+     *
+     * <p>Matching on the far endpoint alone is exact: every edge this robot draws has itself as
+     * {@code fromId} -- {@code acceptFirstAssignment}, {@code relayAlongTuple},
+     * {@code evaluateReturningCertificate} and {@code offer} all do.
+     *
+     * @param otherRobotId the robot at the far end, or a negative id for "nothing to undraw"
      */
-    private void drawEdgeOnce(int fromId, int toId) {
-        for (Edge existing : self.getEdges()) {
-            if (existing.getFromId() == fromId && existing.getToId() == toId) {
-                return;
-            }
+    private void undrawEdgeTo(int otherRobotId) {
+        if (otherRobotId < 0) {
+            return;
         }
-        self.addEdge(new Edge(fromId, toId));
-    }
-
-    /**
-     * Undraws the speculative edge an obligation drew for its child.
-     *
-     * <p>Reference removal, not a {@code toId} match: this only undoes the edge that this
-     * obligation drew, leaving any other already-valid edge to the same robot id alone.
-     * The reference now lives on the obligation rather than in one field, because with
-     * several obligations live a child id no longer identifies which edge object to pull.
-     */
-    private void undrawChildEdge(Edge drawn) {
-        if (drawn != null) {
-            self.getEdges().remove(drawn);
+        if (obligations.isPermanentlyLinkedTo(otherRobotId)) {
+            log("-> keeping the edge to " + otherRobotId + ": a permanent link still connects us");
+            return;
         }
+        self.getEdges().removeIf(edge -> edge.getFromId() == self.getRobotId()
+                && edge.getToId() == otherRobotId);
     }
 
     /** A null obligation means no exclusions -- see {@link #findBestNeighborForEdge}. */
@@ -2658,7 +2694,36 @@ public class CyclebuilderComms extends CommunicationSystem {
     public void        setTrustLevel(TrustLevel t) { this.trust = t; }
 
     public CycleStatus getCycleStatusOf(int outgoingEdgeID) { return completedCycles.get(outgoingEdgeID); }
-    public CycleStatus setCycleStatusOf(int outgoingEdgeID, CycleStatus status) { 
+    /**
+     * Records the outcome of one of <strong>this robot's own</strong> corners.
+     *
+     * <p><strong>An edge id this robot does not track is refused, loudly.</strong> This used to be
+     * an unconditional {@code put}, which meant any caller with the wrong key silently
+     * <em>created</em> a corner rather than being told off -- and a phantom corner is not inert:
+     * {@link #hasFailed()} counts it and {@link #determineNextCycleToComplete()} hands it out, so
+     * the root either chases a corner that does not exist or stands down on one.
+     *
+     * <p>No caller does that today. Every writer keys off either the open attempt -- whose edge id
+     * came from {@code determineNextCycleToComplete()}, so it is a key by construction -- or an
+     * explicit {@code containsKey} guard. But that safety rests on a fact stated nowhere: a
+     * populated map can never reach a robot standing somewhere else, because a root never gets
+     * dropped back to unassigned. It happens to be true (all three vacate paths are gated on
+     * {@code role == cycleBuilder}), and it is exactly the kind of global argument that a later
+     * change breaks without anything noticing. So the guard is here to make the next violation a
+     * log line instead of a root that quietly never finishes.
+     *
+     * <p>The promotion check stays. Writing a corner and then asking whether every corner is now
+     * settled is what this method is <em>for</em>; it is not a side effect.
+     *
+     * @return the status this replaced, or null if the edge is not one of this robot's corners
+     */
+    public CycleStatus setCycleStatusOf(int outgoingEdgeID, CycleStatus status) {
+        if (!completedCycles.containsKey(outgoingEdgeID)) {
+            log("-> ANOMALY: asked to mark edge " + outgoingEdgeID + " as " + status
+                    + ", but that is not a corner of this robot's site. Tracked corners: "
+                    + completedCycles.keySet() + ". Refusing rather than inventing one.");
+            return null;
+        }
         CycleStatus statusToReturn = completedCycles.put(outgoingEdgeID, status);
         if(role == CycleRole.root && hasFailed()) {
             promoteAdjacentVerticesToRoots();
@@ -2774,6 +2839,7 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     public void reset() {
         dropEveryObligationAndItsCustody();
+        forgetTrackedCorners();
         this.anchorParentID = -1;
         this.hasArrived = false;
         this.role = CycleRole.unassigned;
@@ -2815,6 +2881,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         policy.resetProgress();
         this.stableID = -1;
         dropEveryObligationAndItsCustody();
+        forgetTrackedCorners();
         this.anchorParentID = -1;
         this.hasArrived = false;
         this.role = CycleRole.unassigned;
@@ -2849,6 +2916,7 @@ public class CyclebuilderComms extends CommunicationSystem {
         policy.cancelEvasion();
         this.stableID = -1;
         dropEveryObligationAndItsCustody();
+        forgetTrackedCorners();
         this.hasBeenAssigned = true;
         this.anchorParentID = -1;
         this.hasArrived = false;
@@ -2902,6 +2970,36 @@ public class CyclebuilderComms extends CommunicationSystem {
         for (FaceObligation obligation : obligations.drainForVacate()) {
             takeCustody(obligation);
         }
+    }
+
+    /**
+     * Gives up the corner bookkeeping for a lattice site this robot is leaving.
+     *
+     * <p>Called from the three vacate paths and from nowhere else. A robot dropped out of the
+     * formation does not own the corners of a site it has walked away from, and keeping them is not
+     * merely untidy:
+     *
+     * <ul>
+     *   <li>{@code acceptPromotion} asks "am I already a root?" as
+     *       {@code !completedCycles.isEmpty()}, so a robot that kept a stale map is told it needs
+     *       no edge map for its <em>new</em> site, and goes on tracking corners of the old one.</li>
+     *   <li>{@code CommsSnapshot.tracksCycles()} asks the same question for the tick log, so the
+     *       log would show a cycleBuilder reporting corner statuses.</li>
+     *   <li>{@link #hasFailed()} would answer about a site nobody is standing on.</li>
+     * </ul>
+     *
+     * <p>Deliberately <strong>not</strong> called from {@link #resetToRoot()} -- that is the
+     * promotion path, and a promoted robot has not moved, so its corners and its record of what it
+     * has already announced are both still true. Nor from {@code promoteSelfToStable()}, for the
+     * same reason.
+     *
+     * <p>{@code announcedCorners} goes with the map because it is scoped to it: it records which of
+     * <em>these</em> corners have already been handed on, and outliving them would suppress a real
+     * announcement later.
+     */
+    private void forgetTrackedCorners() {
+        completedCycles.clear();
+        announcedCorners.clear();
     }
 
     //LOGGING / SNAPSHOT SUPPORT ---------------------------------------------

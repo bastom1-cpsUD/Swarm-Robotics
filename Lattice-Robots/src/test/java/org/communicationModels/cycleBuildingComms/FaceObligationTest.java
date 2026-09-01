@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.simulation.Edge;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -46,7 +45,6 @@ class FaceObligationTest {
         assertEquals(7, obligation.getParentId());
         assertEquals(3, obligation.getEdgeId());
         assertNull(obligation.getChildId());
-        assertNull(obligation.getChildEdge());
         assertTrue(obligation.isUnfulfilled());
     }
 
@@ -54,12 +52,10 @@ class FaceObligationTest {
     @DisplayName("fulfil records the child and clears outstanding")
     void fulfilSetsChildAndClearsUnfulfilled() {
         FaceObligation obligation = new FaceObligation(7, 3);
-        Edge drawn = new Edge(7, 9);
 
-        obligation.fulfil(9, drawn);
+        obligation.fulfil(9);
 
         assertEquals(9, obligation.getChildId());
-        assertSame(drawn, obligation.getChildEdge());
         assertFalse(obligation.isUnfulfilled());
     }
 
@@ -73,15 +69,16 @@ class FaceObligationTest {
     @DisplayName("release clears the child but keeps parent, edge and bans")
     void releaseClearsChildButKeepsParentAndEdge() {
         FaceObligation obligation = new FaceObligation(7, 3);
-        Edge drawn = new Edge(7, 9);
-        obligation.fulfil(9, drawn);
+        obligation.fulfil(9);
         obligation.ban(9);
 
-        Edge released = obligation.release();
+        obligation.release();
 
-        assertSame(drawn, released, "release must hand back the edge so the caller can undraw it");
+        // Clearing the child slot is the whole of what release does, and it is what makes this link
+        // stop vouching for robot 9 -- which is what lets CyclebuilderComms.undrawEdgeTo decide the
+        // edge to 9 can go. It used to hand back a drawn Edge for the caller to remove by
+        // reference; removal is a topological question now, not an object-identity one.
         assertNull(obligation.getChildId());
-        assertNull(obligation.getChildEdge());
         assertTrue(obligation.isUnfulfilled());
         assertEquals(7, obligation.getParentId());
         assertEquals(3, obligation.getEdgeId());
@@ -116,7 +113,7 @@ class FaceObligationTest {
         assertDoesNotThrow(() -> obligation.matchesChild(9));
         assertFalse(obligation.matchesChild(9));
 
-        obligation.fulfil(9, null);
+        obligation.fulfil(9);
         assertTrue(obligation.matchesChild(9));
         assertFalse(obligation.matchesChild(10));
     }
@@ -131,8 +128,8 @@ class FaceObligationTest {
     void childIdentityHoldsAboveTheIntegerCache() {
         FaceObligation a = new FaceObligation(7, 3);
         FaceObligation b = new FaceObligation(7, 3);
-        a.fulfil(5000, null);
-        b.fulfil(5000, null);
+        a.fulfil(5000);
+        b.fulfil(5000);
 
         assertTrue(a.matchesChild(5000));
         assertEquals(a, b, "two obligations with the same large child id must compare equal");

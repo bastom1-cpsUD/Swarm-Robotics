@@ -86,8 +86,14 @@ class FaceObligationIntegrationTest {
                         + "to read as the robot being its own parent, which said the same thing "
                         + "by riddle and put the tuple in the carried set alongside real debts.");
         assertNotNull(obligation.getChildId(), "the offer went out, so the slot is filled");
-        assertNotNull(obligation.getChildEdge(),
-                "the drawn edge belongs to the obligation, so it can be undrawn per-face");
+        // The obligation no longer holds the drawn edge. Whether an edge survives is decided by
+        // whether a permanent link still connects the two robots -- see
+        // FaceObligationSet.isPermanentlyLinkedTo -- so what is drawn is a function of the
+        // collection's state, not something an individual tuple owns a reference to.
+        assertTrue(root.getEdges().stream()
+                        .anyMatch(e -> e.getFromId() == root.getRobotId()
+                                && e.getToId() == obligation.getChildId()),
+                "the offer drew an edge to the child it went to");
     }
 
     /**

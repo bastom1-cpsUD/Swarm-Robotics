@@ -6,7 +6,6 @@ import java.util.Objects;
 import java.util.Set;
 
 import org.graphs.voltage.VoltageGraph;
-import org.simulation.Edge;
 
 /**
  * One robot's commitment to carry a face certificate across one of its outgoing edges:
@@ -102,16 +101,14 @@ public class FaceObligation {
      */
     private int inFlightInitiatorId = NO_INITIATOR;
 
-    /**
-     * The visualization edge drawn for the current child, held here rather than in one
-     * field on the comms system.
-     *
-     * <p>{@code CyclebuilderComms.removeEdgeToChild} removes this <em>by reference</em>,
-     * deliberately, so that undoing one speculative offer leaves any other already-valid
-     * edge to the same robot id alone. With several obligations live at once a child id no
-     * longer identifies which edge object to pull, so the obligation has to own it.
-     */
-    private Edge childEdge;
+    // No visualization edge is held here any more. There used to be one, so that undoing a
+    // speculative offer could remove exactly the object that offer had drawn, by reference,
+    // leaving any other edge to the same robot alone. Two things retired it. Edge gained value
+    // equality, so a robot holds one object per endpoint pair and a stored reference is often not
+    // the object actually on the robot -- it answered a question it could no longer answer
+    // truthfully. And removal now asks the right question anyway: CyclebuilderComms.undrawEdgeTo
+    // keeps or drops an edge on whether a permanent link still connects the two robots, which is a
+    // property of this collection, not of who drew what.
 
     /** Robots that have declined this face. Scoped here, so bans die with the obligation. */
     private final Set<Integer> unableToDoAssignmentIds = new LinkedHashSet<>();
@@ -120,32 +117,29 @@ public class FaceObligation {
         this.parentId = parentId;
         this.edgeId = edgeId;
         this.childId = null;
-        this.childEdge = null;
     }
 
     /**
      * Records the robot this edge has been offered to.
      *
-     * @param childId   the robot now carrying the certificate onward
-     * @param childEdge the visualization edge drawn for that offer; may be null
+     * @param childId the robot now carrying the certificate onward
      */
-    public void fulfil(int childId, Edge childEdge) {
+    public void fulfil(int childId) {
         this.childId = childId;
-        this.childEdge = childEdge;
     }
 
     /**
      * Clears the child slot after a rejection, keeping parent, edge and bans so the offer
      * can go to a different candidate next tick.
      *
-     * @return the visualization edge that was drawn for the released child, for the caller
-     *         to remove from the robot; null if there was none
+     * <p>Returns nothing. It used to hand back the visualization edge for the caller to remove, and
+     * that made the ordering easy to get right by accident; now that
+     * {@code CyclebuilderComms.undrawEdgeTo} decides on topology instead, a caller has to read the
+     * child id <em>before</em> calling this and undraw <em>after</em> -- because clearing the slot
+     * is exactly what makes this link stop vouching for that robot.
      */
-    public Edge release() {
-        Edge released = this.childEdge;
+    public void release() {
         this.childId = null;
-        this.childEdge = null;
-        return released;
     }
 
     /** Outstanding: nobody is carrying this edge onward yet. */
@@ -178,10 +172,6 @@ public class FaceObligation {
 
     public int getEdgeId() {
         return edgeId;
-    }
-
-    public Edge getChildEdge() {
-        return childEdge;
     }
 
     /**

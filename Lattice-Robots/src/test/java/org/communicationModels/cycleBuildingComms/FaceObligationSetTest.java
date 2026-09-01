@@ -32,8 +32,8 @@ class FaceObligationSetTest {
     @DisplayName("findUnfulfilled returns null when every obligation is fulfilled")
     void findUnfulfilledReturnsNullWhenAllFulfilled() {
         FaceObligationSet set = new FaceObligationSet();
-        set.getOrCreate(1, 10).fulfil(20, null);
-        set.getOrCreate(1, 11).fulfil(21, null);
+        set.getOrCreate(1, 10).fulfil(20);
+        set.getOrCreate(1, 11).fulfil(21);
 
         assertNull(set.findUnfulfilled());
         assertFalse(set.hasOutstanding(), "a robot with every slot filled is free to process mail");
@@ -98,8 +98,8 @@ class FaceObligationSetTest {
         FaceObligationSet set = new FaceObligationSet();
         FaceObligation ten = set.getOrCreate(1, 10);
         FaceObligation eleven = set.getOrCreate(1, 11);
-        ten.fulfil(20, null);
-        eleven.fulfil(21, null);
+        ten.fulfil(20);
+        eleven.fulfil(21);
 
         assertSame(ten, set.findByChild(20));
         assertSame(eleven, set.findByChild(21));
@@ -114,8 +114,8 @@ class FaceObligationSetTest {
     @DisplayName("two children route to two different parents")
     void twoChildrenRouteToTwoDifferentParents() {
         FaceObligationSet set = new FaceObligationSet();
-        set.getOrCreate(1, 10).fulfil(20, null);
-        set.getOrCreate(2, 11).fulfil(21, null);
+        set.getOrCreate(1, 10).fulfil(20);
+        set.getOrCreate(2, 11).fulfil(21);
 
         assertEquals(1, set.findByChild(20).getParentId());
         assertEquals(2, set.findByChild(21).getParentId());
@@ -126,19 +126,18 @@ class FaceObligationSetTest {
     void removalSemantics() {
         FaceObligationSet set = new FaceObligationSet();
         FaceObligation held = set.getOrCreate(1, 10);
-        org.simulation.Edge drawn = new org.simulation.Edge(1, 20);
-        held.fulfil(20, drawn);
+        held.fulfil(20);
 
         // A value-equal but distinct object must not be able to remove the live entry.
         FaceObligation lookalike = new FaceObligation(1, 10);
-        lookalike.fulfil(20, null);
+        lookalike.fulfil(20);
         assertFalse(set.remove(lookalike), "removal must be by identity, not by value");
         assertEquals(1, set.size());
 
         FaceObligation removed = set.removeByChild(20);
-        assertSame(held, removed);
-        assertSame(drawn, removed.getChildEdge(),
-                "the caller needs the drawn edge back to undraw it");
+        assertSame(held, removed,
+                "removeByChild must hand back the live entry, not an equal one: the caller acts on "
+                        + "what it gets, and the two differ in state the moment either is mutated");
         assertTrue(set.isEmpty());
         assertNull(set.removeByChild(20));
     }
@@ -174,7 +173,7 @@ class FaceObligationSetTest {
         FaceObligation middle = set.getOrCreate(1, 11);
         set.getOrCreate(1, 12);
 
-        middle.fulfil(21, null);
+        middle.fulfil(21);
 
         assertEquals(10, set.findUnfulfilled().getEdgeId());
         assertEquals(12, set.findUnfulfilled().getEdgeId());
@@ -260,7 +259,7 @@ class FaceObligationSetTest {
     void emptySetIsTransientNotCompletion() {
         FaceObligationSet set = new FaceObligationSet();
         FaceObligation only = set.getOrCreate(1, 10);
-        only.fulfil(20, null);
+        only.fulfil(20);
         set.removeByChild(20);
 
         assertTrue(set.isEmpty());

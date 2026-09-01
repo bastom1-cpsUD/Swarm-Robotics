@@ -1,8 +1,10 @@
 package org.communicationModels.cycleBuildingComms;
 
 import java.util.List;
+import java.util.Set;
 
 import org.communicationModels.cycleBuildingComms.Messages.PositioningMessage;
+import org.communicationModels.cycleBuildingComms.Messages.RejectAssignmentMessage;
 import org.communicationModels.cycleBuildingComms.Messages.StatusMessage;
 import org.communicationModels.cycleBuildingComms.Messages.VoltageCertificate;
 import org.graphs.util.OrientedPoint;
@@ -249,6 +251,46 @@ class DuplicateCertificateRaceTest {
     }
 
     /**
+     * One drawn edge per neighbour, however many walks cross the link.
+     *
+     * <p>Three sites draw an edge back toward a parent -- accepting a first assignment, relaying,
+     * and closing a face -- and each used to run about once per walk, when a tuple lived and died
+     * with one. Permanent links made them run on every certificate that crosses, so the pile grew
+     * without bound over a long run.
+     *
+     * <p>The guard against that was always present and always dead:
+     * {@code GeometricCycleLatticeRobot.addEdge} reads {@code if(!edges.contains(e)) edges.add(e)},
+     * a set-add spelled as a list-add -- but {@link org.simulation.Edge} had no {@code equals}, so
+     * {@code contains} compared references, every caller handed it a fresh instance, and the check
+     * never once fired. This asserts against {@code addEdge} rather than against any helper on top
+     * of it, because that is where the property belongs.
+     */
+    @Test
+    @DisplayName("a link carrying many walks draws exactly one edge to its neighbour")
+    void manyWalksDrawOneEdge() {
+        List<GeometricCycleLatticeRobot> robots = neighbourhood();
+        LatticeHarness.tick(robots, LONG_RUN);
+
+        for (GeometricCycleLatticeRobot robot : robots) {
+            List<org.simulation.Edge> drawn = List.copyOf(robot.getEdges());
+            // Compared as endpoint pairs, deliberately, and NOT as a HashSet<Edge>: the equality
+            // under test is the thing that would make such a set collapse duplicates, so using it
+            // here would make this assertion true by construction whether or not it holds.
+            Set<String> pairs = new java.util.HashSet<>();
+            for (org.simulation.Edge edge : drawn) {
+                pairs.add(edge.getFromId() + "->" + edge.getToId());
+            }
+            assertEquals(pairs.size(), drawn.size(),
+                    "robot " + robot.getRobotId() + " is holding " + drawn.size() + " drawn edges "
+                            + "covering only " + pairs.size() + " neighbour pairs after " + LONG_RUN
+                            + " ticks: " + drawn + ". Links are permanent and carry many walks, so "
+                            + "every draw site now runs per certificate rather than per walk -- "
+                            + "addEdge has to actually deduplicate, which needs Edge to carry value "
+                            + "equality.");
+        }
+    }
+
+    /**
      * A duplicate certificate arriving on the very corner this root is building is relayed, not
      * refused and not held. Exactly the case the old arbitration fired on.
      */
@@ -290,5 +332,143 @@ class DuplicateCertificateRaceTest {
                         + "its own attempt resolved was tried and deadlocks: duplicate walks share "
                         + "every link along the face, so holding one holds the other -- including "
                         + "this robot's own returning certificate.");
+    }
+
+    private static boolean hasEdgeTo(GeometricCycleLatticeRobot from, int toId) {
+        return from.getEdges().stream()
+                .anyMatch(e -> e.getFromId() == from.getRobotId() && e.getToId() == toId);
+    }
+
+    /**
+     * Refusing a futile offer does not tear down a real connection.
+     *
+     * <p>A root opens a corner nobody occupies, so candidate selection falls through to nearest and
+     * offers the site to a neighbour that is standing correctly somewhere else. The neighbour
+     * refuses, as it must. What must <em>not</em> happen is the offerer deleting the edge between
+     * them, because the two have a permanent communication link and have been relaying for each
+     * other -- the refusal was about one site, not about whether they can talk.
+     *
+     * <p>The failure this pins was subtle and self-inflicted: giving {@code Edge} value equality
+     * made {@code addEdge} deduplicate, so {@code offer}'s freshly built instance was discarded
+     * while the obligation stored it, and removing that stored object matched the surviving good
+     * edge by value and deleted it instead.
+     */
+    @Test
+    @DisplayName("a refusal from a permanently linked neighbour keeps the edge to it")
+    void aRefusalFromALinkedNeighbourKeepsTheEdge() {
+        List<GeometricCycleLatticeRobot> robots = neighbourhood();
+        GeometricCycleLatticeRobot seed = robots.get(0);
+
+        FaceObligation attempt = attemptInFlight(seed);
+        assertNotNull(attempt, "scenario error: the seed never got a walk of its own in flight");
+        int refuser = attempt.getChildId();
+        assertTrue(hasEdgeTo(seed, refuser), "scenario error: the offer should have drawn an edge");
+
+        // Give the seed a permanent link on which the refuser is its PARENT -- the refuser is
+        // standing at the far end of the corner being built, so a walk from it arrives over that
+        // corner's twin, which is the one edge whose position check the seed passes.
+        HalfEdge incoming = SQUARE.getHalfEdgeById(attempt.getEdgeId()).getTwin();
+        seed.enqueueMessage(new PositioningMessage(refuser, seed.getRobotId(),
+                incoming.getOrigin().getId(), incoming.getId(),
+                incoming.getOrigin().getId(), incoming.getId(),
+                new VoltageCertificate(777)));
+        boolean linked = false;
+        for (int tick = 60; tick <= 80 && !linked; tick++) {
+            for (FaceObligation o : seed.executeTimeStep(1.0, tick).after().obligations()) {
+                linked |= o.getParentId() == refuser;
+            }
+        }
+        assertTrue(linked, "scenario error: the seed never opened a link with the refuser as parent");
+
+        // Now the refusal, for the seed's OWN walk -- so it routes through the attempt, not through
+        // the link just built.
+        seed.enqueueMessage(new RejectAssignmentMessage(refuser, seed.getRobotId(),
+                SQUARE.getPrimaryRole().getId(), attempt.getEdgeId(), false,
+                new VoltageCertificate(seed.getRobotId())));
+        seed.executeTimeStep(1.0, 100);
+
+        assertTrue(hasEdgeTo(seed, refuser),
+                "the seed deleted its edge to robot " + refuser + " because that robot refused a "
+                        + "site it could not take -- even though a permanent link still connects "
+                        + "them and they have been relaying for each other. An edge is a claim "
+                        + "about topology; one failed offer does not falsify it.");
+    }
+
+    /** The other half: a refusal from a robot nothing connects us to does drop the edge. */
+    @Test
+    @DisplayName("a refusal from an unlinked robot drops the edge to it")
+    void aRefusalFromAnUnlinkedRobotDropsTheEdge() {
+        List<GeometricCycleLatticeRobot> robots = neighbourhood();
+        GeometricCycleLatticeRobot seed = robots.get(0);
+
+        FaceObligation attempt = attemptInFlight(seed);
+        assertNotNull(attempt, "scenario error: the seed never got a walk of its own in flight");
+        int refuser = attempt.getChildId();
+        assertTrue(hasEdgeTo(seed, refuser), "scenario error: the offer should have drawn an edge");
+
+        seed.enqueueMessage(new RejectAssignmentMessage(refuser, seed.getRobotId(),
+                SQUARE.getPrimaryRole().getId(), attempt.getEdgeId(), false,
+                new VoltageCertificate(seed.getRobotId())));
+        seed.executeTimeStep(1.0, 100);
+
+        assertFalse(hasEdgeTo(seed, refuser),
+                "the edge to robot " + refuser + " survived a refusal, and nothing but the "
+                        + "transient attempt ever connected the two. An attempt that ends leaves "
+                        + "no claim behind it.");
+    }
+
+    /**
+     * A departed child's edge goes, and the ordering inside the sweep is what makes it go.
+     *
+     * <p>The link itself survives a departure -- this robot and its parent have not moved -- so the
+     * only thing that stops it vouching for the robot that left is {@code release()} clearing the
+     * child slot. That release has to happen <em>before</em> the undraw asks
+     * {@code isPermanentlyLinkedTo}. Undraw first and the link still names the departed robot, the
+     * predicate says keep, and every robot that ever wandered off keeps its line forever.
+     */
+    @Test
+    @DisplayName("a departed child loses its edge, though the link that named it survives")
+    void aDepartedChildLosesItsEdge() {
+        List<GeometricCycleLatticeRobot> robots = neighbourhood();
+        GeometricCycleLatticeRobot seed = robots.get(0);
+
+        // A carried link, so the departed robot is a link's child rather than the attempt's --
+        // which is the case where the ordering is observable at all.
+        FaceObligation attempt = attemptInFlight(seed);
+        assertNotNull(attempt, "scenario error: the seed never got a walk of its own in flight");
+        HalfEdge incoming = arrivesOwing(SQUARE.getHalfEdgeById(attempt.getEdgeId()));
+        assertNotNull(incoming, "scenario error: no incoming edge owes that corner");
+        GeometricCycleLatticeRobot sender = occupantOf(robots, incoming.getTwin());
+        assertNotNull(sender, "scenario error: nobody stands where that walk must come from");
+
+        seed.enqueueMessage(new PositioningMessage(sender.getRobotId(), seed.getRobotId(),
+                incoming.getOrigin().getId(), incoming.getId(),
+                incoming.getOrigin().getId(), incoming.getId(),
+                new VoltageCertificate(888)));
+        Integer carriedChild = null;
+        for (int tick = 60; tick <= 80 && carriedChild == null; tick++) {
+            for (FaceObligation o : seed.executeTimeStep(1.0, tick).after().obligations()) {
+                if (o.getParentId() == sender.getRobotId() && o.getChildId() != null) {
+                    carriedChild = o.getChildId();
+                }
+            }
+        }
+        assertNotNull(carriedChild, "scenario error: the seed never carried that walk onward");
+        assertTrue(hasEdgeTo(seed, carriedChild), "scenario error: carrying should have drawn an edge");
+
+        // The child walks out of range.
+        final int gone = carriedChild;
+        seed.clearNeighbors();
+        for (GeometricCycleLatticeRobot other : robots) {
+            if (other.getRobotId() != seed.getRobotId() && other.getRobotId() != gone) {
+                seed.addNeighbor(other);
+            }
+        }
+        seed.executeTimeStep(1.0, 100);
+
+        assertFalse(hasEdgeTo(seed, gone),
+                "robot " + gone + " left range and kept its edge. The sweep releases the link's "
+                        + "child slot and only then undraws; if those run the other way round the "
+                        + "link still vouches for the robot that left and the line never goes.");
     }
 }
