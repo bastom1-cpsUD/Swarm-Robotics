@@ -46,7 +46,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
      * Robot activations per second. One activation is one <em>tick</em>.
      */
     public static final double DEFAULT_TICK_RATE = 1.0;
-    public static final VoltageGraph GRAPH = SnubSquareVoltageGraph.build();
+    public static final VoltageGraph GRAPH = TriangleVoltageGraph.build();
     private static volatile double currentTickRate = DEFAULT_TICK_RATE;
 
     /**
@@ -113,12 +113,28 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
     // ------------------------------------------------------------
     // Constructor
     // ------------------------------------------------------------
+    /** A robot on the lattice the simulation is configured for, {@link #GRAPH}. */
     public GeometricCycleLatticeRobot(int id, OrientedPoint pose) {
+        this(id, pose, GRAPH);
+    }
+
+    /**
+     * A robot on a caller-supplied lattice.
+     *
+     * <p>Exists so tests can exercise a lattice other than the one the simulation happens
+     * to be configured for. The protocol's hardest cases are lattice-specific -- a corner
+     * where a 4-cycle and an 8-cycle meet only exists on octagon-square, and a walk of the
+     * wrong length can only be built where two face lengths differ -- and with the graph
+     * fixed at class-load there is no way to reach them from a test.
+     *
+     * @param graph the voltage graph this robot's comms reasons about
+     */
+    public GeometricCycleLatticeRobot(int id, OrientedPoint pose, VoltageGraph graph) {
         super(id, pose, new TimeStepDiffDrive(), new TriangularModel());
 
         this.latticeMotionModel = (LatticeMotionModel) motionModel;
 
-        this.commsSystem = new CyclebuilderComms(this, GRAPH);
+        this.commsSystem = new CyclebuilderComms(this, graph);
 
         this.edges = new CopyOnWriteArrayList<>();
         this.neighbors = new ArrayList<>();

@@ -4,12 +4,30 @@ public class RejectAssignmentMessage extends AbstractMessage{
     private int originVertexID;
     private int originOutgoingEdgeID;
     private boolean isRetryable;
+    private VoltageCertificate certificate;
 
+    /** A rejection carrying no certificate -- used where the walk never had one to return. */
     public RejectAssignmentMessage(int senderId, int recipient, int originVertexID, int originOutgoingEdgeID, boolean isRetryable) {
+        this(senderId, recipient, originVertexID, originOutgoingEdgeID, isRetryable, null);
+    }
+
+    /**
+     * @param certificate the certificate that arrived with the rejected offer, handed back
+     *                    to the robot that made it. This is what lets that robot re-offer
+     *                    on the spot to a different candidate without ever having kept a
+     *                    copy: the certificate it needs is the one it just got back.
+     */
+    public RejectAssignmentMessage(int senderId, int recipient, int originVertexID, int originOutgoingEdgeID, boolean isRetryable, VoltageCertificate certificate) {
         super(senderId, recipient);
         this.originVertexID = originVertexID;
         this.originOutgoingEdgeID = originOutgoingEdgeID;
         this.isRetryable = isRetryable;
+        this.certificate = certificate;
+    }
+
+    /** The certificate that travelled with the offer being rejected; may be null. */
+    public VoltageCertificate getCertificate() {
+        return certificate;
     }
 
     public int getOriginVertexID() {

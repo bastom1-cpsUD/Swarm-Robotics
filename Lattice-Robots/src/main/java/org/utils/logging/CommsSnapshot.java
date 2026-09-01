@@ -5,8 +5,8 @@ import org.communicationModels.TrustLevel;
 import org.communicationModels.cycleBuildingComms.CycleRole;
 import org.communicationModels.cycleBuildingComms.CycleStatus;
 import org.communicationModels.cycleBuildingComms.CyclebuilderComms;
+import org.communicationModels.cycleBuildingComms.FaceObligation;
 import org.communicationModels.cycleBuildingComms.Messages.AbstractMessage;
-import org.communicationModels.cycleBuildingComms.Messages.ChainMemberList;
 import org.graphs.voltage.HalfEdge;
 
 import java.util.List;
@@ -30,15 +30,47 @@ public record CommsSnapshot(
         CycleRole role,
         TrustLevel trust,
         boolean hasFailed,
-        int pendingChildID,
         int stableID,
-        ChainMemberList chainMemberList,
         HalfEdge assignedEdge,
         HalfEdge originEdge,
         Map<Integer, CycleStatus> completedCycles,
         List<AbstractMessage> queueInOrder,
         Map<Integer, Observation> observations,
-        List<Integer> unableToDoAssignmentIDs
+        /**
+         * The communication tuples this robot holds -- who assigned it each face, which
+         * edge it owes onward, who it has offered that edge to, and who has declined.
+         *
+         * <p>Replaces the flat {@code unableToDoAssignmentIDs} list that used to sit here.
+         * Those exclusions were robot-scoped and so said nothing about <em>which</em> face
+         * a robot had been ruled out of; they are now per-obligation, readable via
+         * {@link FaceObligation#getBans()}.
+         *
+         * <p>It also replaces the two fields that used to sit above it, both of which
+         * survived only while a robot served one face at a time. {@code pendingChildID} was
+         * "the child I am waiting on", which stops being a single value the moment a robot
+         * has several; {@code certificate} was "the walk I am carrying", which stops being
+         * one at the same moment -- the walks now live in the inbox, one per queued
+         * assignment. Neither could be kept as a derived convenience without picking an
+         * arbitrary one of several and reporting it as the answer.
+         */
+        List<FaceObligation> obligations,
+
+        /**
+         * The lattice this robot reasons about, so a reader can resolve the half-edge ids in
+         * {@link #completedCycles()} and {@link #obligations()} back into faces.
+         *
+         * <p>A reference, not a copy: a {@code VoltageGraph} is built once and immutable
+         * thereafter, so there is nothing here to defensively copy and nothing that can
+         * mutate out from under a held snapshot. It is the one field that is the same object
+         * for every robot in a run.
+         *
+         * <p>Carried rather than reached for statically because the graph is injectable --
+         * {@code LatticeHarness} stands up scenarios on eleven different lattices, and a
+         * frame view resolving ids through {@code GeometricCycleLatticeRobot.GRAPH} would
+         * silently render every one of them as whichever lattice the simulation happens to
+         * be configured for.
+         */
+        org.graphs.voltage.VoltageGraph graph
 ) {
 
     /**
@@ -77,6 +109,31 @@ public record CommsSnapshot(
      */
     public int remainingCycles() {
         return totalCycles() - completedCycleCount();
+    }
+
+    /**
+     * The face a tracked corner belongs to, as {@code "<faceId> (<cycleLength>-cycle)"}.
+     *
+     * <p>Task 7 of {@code DCEL-Implementation-Plan.md}, corrected. The doc asks for
+     * {@code completedCycles} to be <em>re-keyed</em> from half-edge to face, which would be
+     * a regression: {@code Face} is a face <em>type</em>, not an instance, so several of a
+     * role's outgoing edges share one face id -- all four on a square lattice, all six on
+     * triangle. Re-keying collapses four corners into one and six into two, a root promotes
+     * itself to stable after closing a single face, and nothing fails to compile and no test
+     * goes red.
+     *
+     * <p>So the key stays the edge and the face travels beside it -- and travels for free,
+     * because a half-edge already knows its incident face. There is nothing to store and
+     * nothing to keep in step; this is a rendering of {@code completedCycles}, not a second
+     * copy of it.
+     */
+    public String describeFaceOf(int outgoingEdgeID) {
+        HalfEdge edge = graph == null ? null : graph.getHalfEdgeById(outgoingEdgeID);
+        if (edge == null || edge.getFace() == null) {
+            return "face ?";
+        }
+        return "face " + edge.getFace().getId()
+                + ", " + edge.getFace().getCycleLength() + "-cycle";
     }
 
     /** How many of this root's cycles currently sit in the given status. */

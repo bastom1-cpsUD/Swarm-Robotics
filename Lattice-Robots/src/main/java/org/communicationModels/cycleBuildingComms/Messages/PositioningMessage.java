@@ -1,7 +1,7 @@
 package org.communicationModels.cycleBuildingComms.Messages;
 
 public class PositioningMessage extends AbstractMessage {
-    private ChainMemberList chainList;
+    private VoltageCertificate certificate;
 
     private int assignedVertexID;
     private int assignedOutgoingEdgeID;
@@ -18,9 +18,9 @@ public class PositioningMessage extends AbstractMessage {
      * @param currentEdge the edge being assigned to the recipient
      * @param rootId the ID of the root whose cycle is being built
      */
-    public PositioningMessage(int senderId, int recipient, int assignedVertexID, int assignedOutgoingEdgeID, int originVertexID, int originOutgoingEdgeID, ChainMemberList chainList) {
+    public PositioningMessage(int senderId, int recipient, int assignedVertexID, int assignedOutgoingEdgeID, int originVertexID, int originOutgoingEdgeID, VoltageCertificate certificate) {
         super(senderId, recipient);
-        this.chainList = chainList;
+        this.certificate = certificate;
 
         this.assignedVertexID = assignedVertexID;
         this.assignedOutgoingEdgeID = assignedOutgoingEdgeID;
@@ -39,8 +39,8 @@ public class PositioningMessage extends AbstractMessage {
      * Retrieves the list of robots in the chain
      * @return
      */
-    public ChainMemberList getChainList() {
-        return chainList;
+    public VoltageCertificate getCertificate() {
+        return certificate;
     }
 
     public int getAssignedVertexID() {
@@ -69,7 +69,7 @@ public class PositioningMessage extends AbstractMessage {
      */
     private String getMessageInfo() {
         return super.messageInfo() + "\n"
-        + "Root ID: " + this.chainList.getRootID() + "\n" 
+        + "Certificate: " + this.certificate + "\n"
         + "Assigned Vertex ID: " + this.assignedVertexID + "\n"
         + "Assigned Edge ID: " + this.assignedOutgoingEdgeID + "\n"        
         + "Beginning Edge of Cycle Vertex ID: " + this.originVertexID + "\n"
@@ -98,11 +98,11 @@ public class PositioningMessage extends AbstractMessage {
             && assignedOutgoingEdgeID == other.getAssignedOutgoingEdgeID()
             && originVertexID == other.getOriginVertexID()
             && originOutgoingEdgeID == other.getOriginOutgoingEdgeID()
-            && this.chainList.equals(other.chainList);
+            && this.certificate.equals(other.certificate);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(super.hashCode(), assignedVertexID, assignedOutgoingEdgeID, originVertexID, originOutgoingEdgeID, chainList);
+        return java.util.Objects.hash(super.hashCode(), assignedVertexID, assignedOutgoingEdgeID, originVertexID, originOutgoingEdgeID, certificate);
     }
 }

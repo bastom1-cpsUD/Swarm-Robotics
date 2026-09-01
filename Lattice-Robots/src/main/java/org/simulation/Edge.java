@@ -29,6 +29,39 @@ public class Edge {
         return toId;
     }
 
+    /**
+     * Value equality on the endpoints, <strong>ordered</strong>.
+     *
+     * <p>{@code GeometricCycleLatticeRobot.addEdge} is a set-add spelled as a list-add:
+     * {@code if(!edges.contains(e)) edges.add(e)}. Without this pair that guard compares
+     * references, every caller hands it a freshly constructed instance, and it has therefore never
+     * once fired. What made that visible was communication tuples becoming permanent -- a link now
+     * carries many walks, and each one drew another identical line onto the robot, without bound.
+     *
+     * <p>Ordered rather than symmetric, because direction is real here. {@link #draw} puts an
+     * arrowhead at the midpoint pointing from {@code fromId} to {@code toId}, and each robot keeps
+     * its own outgoing view of a link -- a parent holds {@code (parent, child)} while the child
+     * holds {@code (child, parent)}, on two different robots' lists. Treating those as equal would
+     * be meaningless (they never meet) and would make the arrow direction depend on which was
+     * added first.
+     */
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof Edge)) {
+            return false;
+        }
+        Edge other = (Edge) o;
+        return this.fromId == other.fromId && this.toId == other.toId;
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(fromId, toId);
+    }
+
     public void draw(Graphics2D g2d, GeometricCycleLatticeRobot from, GeometricCycleLatticeRobot to) {
 
         Point2D pFrom = from.getPosition();

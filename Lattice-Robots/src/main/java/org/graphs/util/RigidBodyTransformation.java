@@ -197,4 +197,38 @@ public class RigidBodyTransformation {
 
         return true;
     }
+
+    /**
+     * Determines whether this transformation is approximately the identity, testing
+     * translation and rotation against separate tolerances.
+     *
+     * <p>Prefer this over {@link #isApproximatelyIdentity(double)} for any geometric
+     * decision. That overload compares raw matrix entries against one scalar, which
+     * silently conflates two different units: the off-diagonal entries are
+     * dimensionless sines and cosines, while the third column is a translation in
+     * lattice units (tens). A tolerance loose enough to admit real accumulated
+     * position drift over a face therefore also admits a rotation that is wildly
+     * wrong, and a tolerance tight enough to pin the rotation rejects every real
+     * closure. The two must be sized independently.
+     *
+     * @param positionEpsilon maximum translation magnitude, in lattice units
+     * @param angleEpsilon maximum absolute rotation, in radians
+     * @return true if this transformation is within both tolerances of the identity
+     */
+    public boolean isApproximatelyIdentity(double positionEpsilon, double angleEpsilon) {
+        // The third column is the image of the origin -- the same quantity asPose()
+        // reports -- read directly here to avoid allocating a pose per test. Its
+        // magnitude is the true distance between the two frames' origins: the stored
+        // translation is the offset rotated into the source frame, and rotation
+        // preserves length.
+        double dx = matrix.get(0, 2);
+        double dy = matrix.get(1, 2);
+        if (Math.hypot(dx, dy) > positionEpsilon) {
+            return false;
+        }
+
+        // getRotation() is an atan2, so it is already wrapped into [-pi, pi] and needs
+        // no further normalization before taking its magnitude.
+        return Math.abs(getRotation()) <= angleEpsilon;
+    }
 }
