@@ -179,35 +179,40 @@ class ConcurrentFaceTest {
     }
 
     /**
-     * The other half of custody: what is held must eventually be let go. A queued assignment
-     * whose walk has finished would otherwise sit in the inbox forever, and -- worse -- keep
-     * re-creating the tuple it belongs to every time it was reconsidered.
+     * The other half of custody: what is held must eventually be let go, and nothing may be left
+     * behind in the inbox once the run settles.
+     *
+     * <p><strong>The invariant here is the reverse of what it used to be.</strong> This test once
+     * asserted that every carried tuple always had an assignment queued for it, on the reasoning
+     * that the queued message <em>was</em> the certificate store and a tuple without one could
+     * never relay. Both halves of that are now false. Relaying is inline, so a robot standing on
+     * its site forwards the certificate in the activation it arrives and holds nothing; and a
+     * carried tuple is a permanent communication link that long outlives any particular walk, so
+     * "no assignment queued" is its normal resting state rather than a lost certificate.
+     *
+     * <p>What is still worth pinning is that the inbox drains: a queued assignment that nobody
+     * ever consumes would be a walk stranded where no tuple points at it.
      */
     @Test
-    @DisplayName("custody is released when the walk resolves, leaving no orphan in the queue")
-    void custodyIsReleasedWhenTheWalkResolves() {
+    @DisplayName("no assignment is left stranded in an inbox once the run settles")
+    void inboxesDrainOnceTheRunSettles() {
         List<GeometricCycleLatticeRobot> robots =
                 LatticeHarness.placeOnFace(SQUARE, firstOutgoingEdge(SQUARE), new OrientedPoint(0, 0, 0));
         robots.get(0).promoteToPrimaryRoot();
 
-        List<TickRecord> records = LatticeHarness.tick(robots, 60);
+        List<TickRecord> records = LatticeHarness.tick(robots, 120);
 
-        // Checked in one direction only, deliberately. A queued assignment with no tuple is
-        // ordinary -- it is an offer this robot has not answered yet. A tuple with no queued
-        // assignment is the failure: the certificate it exists to carry is gone, so the walk
-        // can never be relayed and the parent waits on it forever.
-        for (TickRecord record : records) {
-            CommsSnapshot after = record.after();
-            for (FaceObligation obligation : after.obligations()) {
-                if (obligation.getParentId() == FaceObligation.NO_PARENT) {
-                    continue;
-                }
-                assertNotNull(queuedAssignmentFor(after, obligation),
-                        "robot " + record.robotId() + " holds a carried tuple on edge "
-                                + obligation.getEdgeId() + " at tick " + record.tick()
-                                + " with no assignment queued for it. Its certificate is gone, "
-                                + "so the walk can never be relayed and the parent waits forever.");
-            }
+        for (GeometricCycleLatticeRobot robot : robots) {
+            TickRecord last = LatticeHarness.lastRecordOf(records, robot.getRobotId());
+            long queuedAssignments = last.after().queueInOrder().stream()
+                    .filter(m -> m instanceof PositioningMessage)
+                    .count();
+            assertEquals(0, queuedAssignments,
+                    "robot " + robot.getRobotId() + " ended the run with " + queuedAssignments
+                            + " assignment(s) still queued. An assignment is held only while a "
+                            + "robot is driving to its first site; once everyone is settled the "
+                            + "queue must have drained, or a walk is stranded where nothing "
+                            + "points at it. Queue: " + last.after().queueInOrder());
         }
     }
 
@@ -252,22 +257,33 @@ class ConcurrentFaceTest {
     }
 
     /**
-     * Two roots on one face. Every robot on a cycle sees the certificate before it closes, so
-     * whichever of them meets the other's walk first can detect the duplication and stand
-     * down; lower initiator id wins, matching {@code outranks}.
+     * Several roots on one face, all building it at once. <strong>They no longer collapse to
+     * one.</strong>
      *
-     * <p>Run in both list orders, because activation order decides which root's walk arrives
-     * first and the outcome must not depend on that. If it did, the collapse would be a race
-     * rather than a rule, and the sim's staggered activation would make it intermittent.
+     * <p>There used to be arbitration here: whichever root met another's walk first compared
+     * initiator ids and the loser stood down. Every refusal that produced landed on a robot
+     * standing <em>exactly on the site it was refusing</em>, and a rejection is non-retryable --
+     * so the offerer banned the one robot that could occupy that site, worked down candidates that
+     * were all equally not-there, and wrote the corner off. Replacing the refusal with a hold
+     * deadlocked instead: duplicate walks on one face share every link along it, so holding one
+     * holds the other, including the holder's own returning certificate.
+     *
+     * <p>So duplicates are simply carried. Each laps the face and closes at its own initiator; a
+     * corner already complete makes the later one a no-op. What this test now pins is that
+     * everyone closes rather than exactly one -- and that nobody is ever refused a site they are
+     * standing on, which is the property the original defect broke.
+     *
+     * <p>Run in both list orders, because activation order decides which walk arrives first and
+     * the outcome must not depend on it.
      */
     @Test
-    @DisplayName("two roots building one face collapse to one, whichever walk arrives first")
-    void coInitiationCollapsesInBothArrivalOrders() {
-        assertCoInitiationCollapses(false);
-        assertCoInitiationCollapses(true);
+    @DisplayName("duplicate walks on one face are all carried, and each closes at its own initiator")
+    void duplicateWalksAllCloseInBothArrivalOrders() {
+        assertDuplicateWalksClose(false);
+        assertDuplicateWalksClose(true);
     }
 
-    private void assertCoInitiationCollapses(boolean reversed) {
+    private void assertDuplicateWalksClose(boolean reversed) {
         List<GeometricCycleLatticeRobot> robots =
                 LatticeHarness.placeOnFace(SQUARE, firstOutgoingEdge(SQUARE), new OrientedPoint(0, 0, 0));
         for (GeometricCycleLatticeRobot robot : robots) {
@@ -282,28 +298,74 @@ class ConcurrentFaceTest {
         List<TickRecord> records = LatticeHarness.tick(order, LONG_RUN);
 
         String where = reversed ? " (reversed activation order)" : "";
-        boolean someoneClosed = false;
-        for (GeometricCycleLatticeRobot robot : robots) {
-            someoneClosed |= LatticeHarness.anyCycleComplete(records, robot.getRobotId());
-        }
-        assertTrue(someoneClosed,
-                "two roots on one face closed nothing in " + LONG_RUN + " ticks" + where
-                        + ". Co-initiation is meant to collapse to one walk, not to deadlock "
-                        + "both -- see collapseCoInitiation.");
 
-        // And nobody was left holding a tuple with no certificate behind it, which is how a
-        // stand-down goes wrong: drop the walk and keep the obligation.
+        // Every root closed its own walk, not just one of them.
         for (GeometricCycleLatticeRobot robot : robots) {
-            for (FaceObligation obligation : obligationsOf(records, robot.getRobotId())) {
-                TickRecord last = LatticeHarness.lastRecordOf(records, robot.getRobotId());
-                if (obligation.getParentId() == FaceObligation.NO_PARENT) {
+            assertTrue(LatticeHarness.anyCycleComplete(records, robot.getRobotId()),
+                    "robot " + robot.getRobotId() + " closed nothing in " + LONG_RUN + " ticks"
+                            + where + ". Every root on this face mints its own certificate, and "
+                            + "each one laps the face and closes at its own initiator -- duplicates "
+                            + "are redundant, not conflicting. A root that closed nothing means "
+                            + "its walk was refused or held somewhere along the way.");
+        }
+
+        // And nobody was ever sent to a site somebody else was already standing on.
+        //
+        // This is the visible half of the same defect. Refusing a robot that occupies the offered
+        // site burns it off that face's ban list, and the offerer then works down candidates that
+        // are all somewhere else -- so the offer that eventually goes out names a site with an
+        // occupant who was skipped. Two robots for one lattice site is what the operator sees.
+        //
+        // Positions are read live because nothing in this scene moves: every robot is placed on its
+        // exact site and stays there.
+        assertNoOfferToAnOccupiedSite(robots, records, where);
+    }
+
+    /**
+     * Fails if any assignment named a site that a robot other than its recipient was standing on.
+     *
+     * <p>The assigned edge is parsed out of the logged summary rather than plumbed through a new
+     * accessor: {@code OutgoingMessageRecord} deliberately keeps a rendered string rather than the
+     * message object, and this is the only caller that needs to look inside one.
+     */
+    private static void assertNoOfferToAnOccupiedSite(List<GeometricCycleLatticeRobot> robots,
+                                                      List<TickRecord> records, String where) {
+        java.util.regex.Pattern assignedEdge =
+                java.util.regex.Pattern.compile("Assigned Edge ID: (-?\\d+)");
+        for (TickRecord record : records) {
+            GeometricCycleLatticeRobot sender = byId(robots, record.robotId());
+            for (var sent : record.sent()) {
+                if (!"Assignment".equals(sent.messageType())) {
                     continue;
                 }
-                assertNotNull(queuedAssignmentFor(last.after(), obligation),
-                        "robot " + robot.getRobotId() + " ended holding a carried tuple with no "
-                                + "certificate" + where);
+                var matcher = assignedEdge.matcher(sent.summary());
+                assertTrue(matcher.find(), "could not read the assigned edge out of: " + sent.summary());
+                HalfEdge edge = SQUARE.getHalfEdgeById(Integer.parseInt(matcher.group(1)));
+                OrientedPoint target = new org.graphs.util.RigidBodyTransformation(sender.getPosition())
+                        .compose(edge.getVoltage()).asPose();
+
+                for (GeometricCycleLatticeRobot other : robots) {
+                    if (other.getRobotId() == sent.recipientId()) {
+                        continue;
+                    }
+                    assertFalse(other.getPosition().distance(target) < org.utils.MathUtils.EPSILON,
+                            "robot " + record.robotId() + " offered robot " + sent.recipientId()
+                                    + " the site at " + target + " on tick " + record.tick() + where
+                                    + ", but robot " + other.getRobotId() + " is already standing "
+                                    + "there. The occupant should have been the one carrying that "
+                                    + "walk; it was skipped, which is what a stale ban does.");
+                }
             }
         }
+    }
+
+    private static GeometricCycleLatticeRobot byId(List<GeometricCycleLatticeRobot> robots, int id) {
+        for (GeometricCycleLatticeRobot robot : robots) {
+            if (robot.getRobotId() == id) {
+                return robot;
+            }
+        }
+        throw new IllegalArgumentException("no robot " + id);
     }
 
     /**

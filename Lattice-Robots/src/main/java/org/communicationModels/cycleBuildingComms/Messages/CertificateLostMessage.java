@@ -17,6 +17,12 @@ package org.communicationModels.cycleBuildingComms.Messages;
  * and an intermediate robot forwards it while <em>keeping its own tuple intact</em>: the
  * topology it describes is still correct, only the message in flight was lost.
  *
+ * <p><strong>Routed by {@link #getInitiatorId()}, exactly like a {@code StatusMessage}.</strong>
+ * It travels child -&gt; parent along the communication tuples and stops at the robot whose id it
+ * names. Keying it off the tuple's own parentage instead would be wrong for the same reason it is
+ * wrong for a status: a robot relays walks it did not mint, so "is this tuple mine" answers a
+ * different question from "did I mint the walk this report is about".
+ *
  * <p><strong>Delivery is guaranteed, so no timeout backstop is needed.</strong> Every hop of
  * the upward path is a parent parked one lattice edge away and permanently in range -- a
  * robot only becomes a parent after it is in position, and a parked robot never loses
@@ -36,11 +42,26 @@ public class CertificateLostMessage extends AbstractMessage {
 
     private final int originVertexID;
     private final int originOutgoingEdgeID;
+    private final int initiatorId;
 
-    public CertificateLostMessage(int senderId, int recipient, int originVertexID, int originOutgoingEdgeID) {
+    /**
+     * @param initiatorId the robot that minted the lost walk, and the only one that can mint a
+     *                    replacement. Relayers pass it through untouched; it is where this report
+     *                    stops travelling.
+     */
+    public CertificateLostMessage(int senderId, int recipient, int originVertexID, int originOutgoingEdgeID, int initiatorId) {
         super(senderId, recipient);
         this.originVertexID = originVertexID;
         this.originOutgoingEdgeID = originOutgoingEdgeID;
+        this.initiatorId = initiatorId;
+    }
+
+    /**
+     * The robot that minted the walk whose certificate was lost -- the only one that can replace
+     * it, and the point at which this report stops travelling.
+     */
+    public int getInitiatorId() {
+        return initiatorId;
     }
 
     /** Which corner the lost walk belonged to, so the initiator knows what to relaunch. */
@@ -68,6 +89,7 @@ public class CertificateLostMessage extends AbstractMessage {
     @Override
     public String toString() {
         return super.toString() + "\n"
+            + "Initiator ID: " + initiatorId + "\n"
             + "Beginning Edge of Cycle Vertex ID: " + originVertexID + " \n"
             + "Beginning Edge of Cycle Edge ID: " + originOutgoingEdgeID;
     }
@@ -87,11 +109,12 @@ public class CertificateLostMessage extends AbstractMessage {
         CertificateLostMessage other = (CertificateLostMessage) o;
 
         return originVertexID == other.getOriginVertexID()
-            && originOutgoingEdgeID == other.getOriginOutgoingEdgeID();
+            && originOutgoingEdgeID == other.getOriginOutgoingEdgeID()
+            && initiatorId == other.getInitiatorId();
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(super.hashCode(), originVertexID, originOutgoingEdgeID);
+        return java.util.Objects.hash(super.hashCode(), originVertexID, originOutgoingEdgeID, initiatorId);
     }
 }

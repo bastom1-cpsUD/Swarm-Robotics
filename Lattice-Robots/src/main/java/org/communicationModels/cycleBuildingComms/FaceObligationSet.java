@@ -35,11 +35,18 @@ import org.graphs.voltage.HalfEdge;
  * <p>Every rule this class enforces is a property of the <em>collection</em>:
  *
  * <ul>
+ *   <li><strong>Carried tuples are permanent; the attempt is not.</strong> A carried tuple is a
+ *       communication link and is dropped only when this robot vacates its site
+ *       ({@link #drainForVacate()}); a status resolving does not touch it. The attempt is an
+ *       in-flight marker, opened by {@link #beginAttempt} and dropped by {@link #clearAttempt}
+ *       when its corner's status comes home. Conflating the two is what a persistent-link design
+ *       must not do: read "a tuple exists" as "a walk is in flight" and every corner a
+ *       neighbour's walk has ever crossed becomes permanently unavailable.</li>
  *   <li><strong>One carried tuple per edge.</strong> {@link #getOrCreate} returns the
  *       existing entry rather than adding a second, so the rule cannot be broken by a call
  *       site forgetting to check first. This is what makes a duplicate certificate on an edge
- *       harmless -- both relay through the same tuple, and a filtered duplicate's late
- *       traffic is idempotent.</li>
+ *       harmless -- both relay through the same tuple, one after the other, and each closes at
+ *       its own initiator.</li>
  *   <li><strong>At most one attempt.</strong> A robot builds one face of its own at a time;
  *       all of its corners draw candidates from the same neighbourhood, so starting a second
  *       before the first has a walk in flight spends the same robots twice.</li>
@@ -247,6 +254,35 @@ public class FaceObligationSet {
             }
         }
         return myAttemptedCycle != null && myAttemptedCycle.isUnfulfilled() ? myAttemptedCycle : null;
+    }
+
+    /**
+     * The link this robot offered to that child <em>for this particular walk</em>, falling back to
+     * the child alone when nothing records the walk.
+     *
+     * <p>Needed because the attempt is allowed to duplicate a carried link. A root building corner
+     * {@code c} and relaying somebody else's walk that also owes {@code c} offers both to the same
+     * neighbour, so two tuples name that child -- and {@link #findByChild} answers with the carried
+     * one, because it scans {@link #carried} first. A response routed through the wrong one of the
+     * two marks the wrong corner and travels to the wrong parent.
+     *
+     * <p>{@link FaceObligation#getInFlightInitiator()} separates them: it records who minted the
+     * walk each link most recently carried, and the two duplicates are carrying different walks or
+     * they would not be duplicates. The fallback keeps behaviour unchanged wherever nothing is
+     * ambiguous -- a response whose walk this robot has already forgotten still routes by child,
+     * which is what it did before this existed.
+     */
+    public FaceObligation findByChildForWalk(int childId, int initiatorId) {
+        for (FaceObligation obligation : carried) {
+            if (obligation.matchesChild(childId) && obligation.getInFlightInitiator() == initiatorId) {
+                return obligation;
+            }
+        }
+        if (myAttemptedCycle != null && myAttemptedCycle.matchesChild(childId)
+                && myAttemptedCycle.getInFlightInitiator() == initiatorId) {
+            return myAttemptedCycle;
+        }
+        return findByChild(childId);
     }
 
     /** The obligation this robot offered to that child, carried or its own. */

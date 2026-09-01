@@ -26,17 +26,28 @@ import org.simulation.Edge;
  * still in transit, and it silently breaks the one-tuple-per-edge rule as soon as two
  * certificates target the same edge before either is forwarded.
  *
- * <p><strong>Three outcomes, and only one of them removes the tuple.</strong>
+ * <p><strong>Nothing removes a carried tuple.</strong> It is a communication link, not a
+ * commitment to one walk: a robot in formation has fixed lattice neighbours, so
+ * {@code (parent, edge) -> child} is a standing fact that outlives every walk that uses it. The
+ * next certificate over this edge is forwarded to the same child with no candidate search at all,
+ * which is the whole reason links are kept.
  * <ul>
- *   <li><em>Status</em> from the child -- forward it to {@link #getParentId()} and remove
- *       the tuple. The face is settled either way, success or failure.</li>
+ *   <li><em>Status</em> from the child -- forward it to {@link #getParentId()} and keep
+ *       everything. Both robots are exactly where they were; the face being settled says
+ *       nothing about whether they are still adjacent.</li>
  *   <li><em>Rejection</em> from the child -- {@link #release()} the child slot and
- *       {@link #ban(int)} the rejecter, then re-offer on the spot. The tuple survives with
- *       its parent, edge and bans intact. A rejection that removed the tuple would
- *       propagate up the chain, which is the behaviour this design exists to stop.</li>
- *   <li><em>Child observed gone</em> -- remove the tuple and report the loss upward,
- *       because the certificate cannot be recovered from here.</li>
+ *       {@link #ban(int)} the rejecter, then re-offer on the spot with the certificate the
+ *       rejection handed back. Parent, edge and bans survive.</li>
+ *   <li><em>Child observed gone</em> -- {@link #release()} the binding and report the loss
+ *       upward, because the certificate cannot be recovered from here. The link itself stays:
+ *       the site on the far side of the edge is still a site, and the next walk over it rebinds
+ *       with the bans already learned.</li>
  * </ul>
+ *
+ * <p>The one thing that does remove a carried tuple is this robot vacating its lattice site --
+ * see {@link FaceObligationSet#drainForVacate()} -- because that is the one event that makes the
+ * adjacency untrue. The <em>attempt</em> is different in kind and is transient by design: it is
+ * opened when a root picks a corner and dropped when that corner's status comes home.
  *
  * <p>Lifetime keys on <strong>position, not role</strong>. A promotion leaves the robot
  * exactly where it is, so its topology is still real and its obligations survive.
@@ -67,10 +78,29 @@ public class FaceObligation {
      */
     public static final int NO_PARENT = -1;
 
+    /** {@link #getInFlightInitiator()} value meaning "no walk has been sent over this link yet". */
+    public static final int NO_INITIATOR = -1;
+
     private final int parentId;
     private final int edgeId;
 
     private Integer childId;
+
+    /**
+     * Who minted the walk most recently sent over this link.
+     *
+     * <p><strong>An id, deliberately, and not the certificate.</strong> The class contract above
+     * says a certificate is never stored here, and it still is not: two certificates can target one
+     * edge before either is answered, so a slot holding one of them would silently drop the other.
+     * A single scalar has no such failure -- it is overwritten by the next offer, which is exactly
+     * the walk a loss report would be about.
+     *
+     * <p>It exists because relaying became inline. A robot forwards the certificate in the same
+     * activation it reads it and keeps no copy, so when its child later vanishes it has nothing
+     * left to name the walk with -- and a {@code CertificateLostMessage} that cannot name its
+     * initiator cannot be routed to the only robot able to mint a replacement.
+     */
+    private int inFlightInitiatorId = NO_INITIATOR;
 
     /**
      * The visualization edge drawn for the current child, held here rather than in one
@@ -154,6 +184,22 @@ public class FaceObligation {
         return childEdge;
     }
 
+    /**
+     * Records who minted the walk just sent over this link, so a later loss report can name it.
+     * Called by every offer; the latest wins, which is the walk in flight.
+     */
+    public void setInFlightInitiator(int initiatorId) {
+        this.inFlightInitiatorId = initiatorId;
+    }
+
+    /**
+     * The minter of the most recent walk sent over this link, or {@link #NO_INITIATOR} if none has
+     * been. See the field for why this is an id rather than the certificate itself.
+     */
+    public int getInFlightInitiator() {
+        return inFlightInitiatorId;
+    }
+
     /** Excludes a robot from this face only. A ban on one face says nothing about another. */
     public void ban(int bannedId) {
         this.unableToDoAssignmentIds.add(bannedId);
@@ -166,6 +212,26 @@ public class FaceObligation {
     /** Read-only view, for snapshots and logging. */
     public Set<Integer> getBans() {
         return Collections.unmodifiableSet(unableToDoAssignmentIds);
+    }
+
+    /**
+     * Forgets every exclusion on this link, and clears the in-flight walk with them.
+     *
+     * <p><strong>A ban is scoped to one walk, not to the link.</strong> It exists to make a single
+     * offer sequence finite -- offer, refuse, ban, offer the next candidate -- and once that walk
+     * has resolved it is stale evidence about where robots were, not where they are.
+     *
+     * <p>That distinction did not matter while a tuple was removed when its walk resolved, because
+     * the bans went with it. It matters completely now that links are permanent: a robot that
+     * refused once, from wherever it happened to be standing at the time, would be excluded from
+     * that link <em>forever</em>. When it later settles onto the very site the link points at, the
+     * exclusion hides it -- and because {@code findBestNeighborForEdge} keeps its ban check ahead
+     * of its exact-position match (deliberately, or the offer loop loses its bound), the offerer
+     * skips the actual occupant and sends somebody else to a site that is already taken.
+     */
+    public void clearForResolvedWalk() {
+        this.unableToDoAssignmentIds.clear();
+        this.inFlightInitiatorId = NO_INITIATOR;
     }
 
     @Override
