@@ -461,6 +461,16 @@ public class CyclebuilderComms extends CommunicationSystem {
         // Set here and nowhere else: this is the only transition that decides which robot this one
         // is anchored to. See the anchorParentID javadoc.
         anchorParentID = pm.getSenderId();
+        // A builder tracks the corners of the site it is taking, from the moment it takes it.
+        //
+        // AFTER setAssignedEdge, necessarily: initializeEdgeMap reads getCurrentRole(), which
+        // resolves through getAssignedEdge().getTarget(), so the edge has to be in place or the
+        // map would be built for the primary role instead of this robot's.
+        //
+        // Doing this on acceptance rather than on arrival is safe because processMessages returns
+        // early for a builder that has not arrived -- nothing can write into the map while the
+        // robot is still travelling to the site the map describes.
+        initializeEdgeMap();
         self.addEdge(new Edge(self.getRobotId(), anchorParentID));
         holdInCustody(pm, pm.getSenderId(), pm.getAssignedOutgoingEdgeID());
         log("-> became cycleBuilder: edge id=" + getAssignedEdge().getId()
@@ -1431,9 +1441,15 @@ public class CyclebuilderComms extends CommunicationSystem {
      * from its own side. Only {@link #settleOwnWalk} writes a failure, and only for the walk it
      * minted.
      *
-     * <p>A no-op for a cycleBuilder, whose {@code completedCycles} is empty until promotion fills
-     * it. The {@code containsKey} guard is what keeps a relaying root from inventing a corner it
-     * does not own.
+     * <p><strong>Every participant records, not just the roots.</strong> A builder tracks the
+     * corners of its site from the moment it takes one, so the wrapping status is recorded by
+     * everyone it passes rather than delivered and discarded. It used to be a no-op for a builder,
+     * whose map was empty until promotion filled it -- and the cost was measurable: each
+     * participant re-derived the same face from scratch after promotion, minting its own
+     * certificate and running a full lap to learn what this status already told it.
+     *
+     * <p>The {@code containsKey} guard is therefore no longer a role filter. It is what it reads
+     * as: a refusal to invent a corner this robot does not own.
      */
     private void markCornerFromStatus(FaceObligation tuple, StatusMessage sm) {
         int corner = edgeIdOwedBy(tuple);
@@ -1962,7 +1978,13 @@ public class CyclebuilderComms extends CommunicationSystem {
 
     /**
      * Gives this robot a corner to track for every edge leaving its role, <em>and no others</em>.
-     * Run once, at the moment it becomes a root, and nowhere else.
+     *
+     * <p>Run once per lattice site a robot occupies: when it accepts an assignment and becomes a
+     * builder, or when it is promoted straight from unassigned. <strong>Not</strong> when a builder
+     * is promoted to root -- it already has this map, and re-running would reset every corner to
+     * {@code unattempted}, discarding the closures a wrapping status recorded while it was
+     * building. That is the one call site where getting this wrong is silent: the tests still pass
+     * and the robot simply re-derives everything it already knew.
      *
      * <p>Clears before it fills, which it did not used to. Adding one entry per outgoing edge
      * without removing anything cannot establish the postcondition the name claims: a robot
@@ -2675,11 +2697,12 @@ public class CyclebuilderComms extends CommunicationSystem {
         // seeking, and every child it later places is offset from the real lattice. The gate
         // keeps the promotion queued, unread and uncounted, until arrival.
 
-        // "Already a root" asked as the thing it actually means. Tracking corners IS what
-        // being a root is -- initializeEdgeMap is what makes one -- so this reads the state
-        // rather than the label, and gives the same answer for a root, a builder and an
-        // unassigned robot without having to enumerate them.
-        if (!completedCycles.isEmpty()) {
+        // "Am I already a root" asked of the role, which is what roles are for. This used to read
+        // `!completedCycles.isEmpty()`, on the reasoning that tracking corners IS what being a root
+        // is -- true only while roots were the sole robots with a corner map. Builders track their
+        // own corners now, so that test would answer "already a root" for every builder ever
+        // promoted, and the branch below that grants rootship would never run.
+        if (role == CycleRole.root) {
             if (pm.hasReachedStable()) {
                 resetToRoot();
                 reattemptFailedCycles();
@@ -2692,6 +2715,15 @@ public class CyclebuilderComms extends CommunicationSystem {
                     + "(NOT REACTIVATED, WILL NOT ATTEMPT TO COMPLETE CYCLES)";
         }
 
+        // A different question, and the map-emptiness test is the right one to answer it with: do I
+        // have a corner map yet? A promoted BUILDER does, built when it took its site, and it must
+        // keep it -- re-initialising resets every corner to unattempted and discards exactly the
+        // marks a wrapping status left behind, which is the whole reason builders track corners.
+        // A promoted UNASSIGNED robot does not, and that is reachable:
+        // promoteAdjacentVerticesToRoots crowns whoever is standing on a complete corner, and that
+        // can be a robot that never took an assignment.
+        boolean alreadyTracking = !completedCycles.isEmpty();
+
         resetToRoot();
         stableID = pm.getSenderId();
         // The promotion carries the PROMOTER's outgoing edge, which is generally not the edge
@@ -2702,8 +2734,12 @@ public class CyclebuilderComms extends CommunicationSystem {
         // which promoteAdjacentVerticesToRoots guarantees: it only promotes across a COMPLETE
         // corner, and a corner is complete only because a walk reached a robot standing there.
         setAssignedEdge(pm.getAssignedVertexID(), pm.getAssignedOutgoingEdgeID());
-        initializeEdgeMap();
-        log("-> promoted to root by robot " + stableID);
+        if (!alreadyTracking) {
+            initializeEdgeMap();
+        }
+        log("-> promoted to root by robot " + stableID
+                + (alreadyTracking ? ", keeping the corners it already recorded: " + completedCycles
+                                   : ""));
         return "Promotion Message from " + pm.getSenderId() + "(ACCEPTED)";
     }
 
@@ -3024,13 +3060,18 @@ public class CyclebuilderComms extends CommunicationSystem {
      * merely untidy:
      *
      * <ul>
-     *   <li>{@code acceptPromotion} asks "am I already a root?" as
-     *       {@code !completedCycles.isEmpty()}, so a robot that kept a stale map is told it needs
-     *       no edge map for its <em>new</em> site, and goes on tracking corners of the old one.</li>
-     *   <li>{@code CommsSnapshot.tracksCycles()} asks the same question for the tick log, so the
-     *       log would show a cycleBuilder reporting corner statuses.</li>
+     *   <li>{@code acceptPromotion} asks "do I have a corner map yet?" as
+     *       {@code !completedCycles.isEmpty()} and skips {@link #initializeEdgeMap()} when the
+     *       answer is yes, so a robot that kept a stale map would be handed rootship still
+     *       tracking the corners of the site it left.</li>
+     *   <li>{@code CommsSnapshot.tracksCycles()} asks the same thing for the tick log, so the log
+     *       would report corner statuses for a robot that owns no corners.</li>
      *   <li>{@link #hasFailed()} would answer about a site nobody is standing on.</li>
      * </ul>
+     *
+     * <p>Note that the first of those is no longer the "am I already a root?" question -- that is
+     * {@code role == CycleRole.root} now, since builders carry a corner map too and the map can no
+     * longer stand in for the role.</p>
      *
      * <p>Deliberately <strong>not</strong> called from {@link #resetToRoot()} -- that is the
      * promotion path, and a promoted robot has not moved, so its corners and its record of what it

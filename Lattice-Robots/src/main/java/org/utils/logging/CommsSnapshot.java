@@ -77,11 +77,16 @@ public record CommsSnapshot(
      * Whether {@link #completedCycles()} means anything for this robot.
      *
      * <p>The map is populated by {@code CyclebuilderComms.initializeEdgeMap()},
-     * which only runs on promotion to {@code root} — one entry per outgoing
-     * half-edge of the role this robot occupies. It is empty for
-     * {@code unassigned}/{@code cycleBuilder} robots, and survives the
-     * subsequent promotion to {@code stable} (fully complete at that point),
-     * so this is keyed off the map rather than off {@link #role()}.</p>
+     * which runs once per lattice site a robot occupies — when it accepts an
+     * assignment and becomes a {@code cycleBuilder}, or when it is promoted
+     * straight from {@code unassigned} — one entry per outgoing half-edge of
+     * the role it occupies. So builders track corners too: a status wrapping a
+     * closed face is recorded by every participant, not only by the roots.</p>
+     *
+     * <p>Empty only for {@code unassigned} robots, and it survives promotion to
+     * {@code root} and then to {@code stable}. Keyed off the map rather than off
+     * {@link #role()} because no single role answers this — one role has no map
+     * and the other three do.</p>
      */
     public boolean tracksCycles() {
         return !completedCycles.isEmpty();

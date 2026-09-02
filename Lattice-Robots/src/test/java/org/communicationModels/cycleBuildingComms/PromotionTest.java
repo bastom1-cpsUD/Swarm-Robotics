@@ -1,6 +1,7 @@
 package org.communicationModels.cycleBuildingComms;
 
 import java.util.List;
+import java.util.Set;
 
 import org.communicationModels.cycleBuildingComms.Messages.PromotionMessage;
 import org.graphs.util.OrientedPoint;
@@ -255,5 +256,67 @@ class PromotionTest {
                         + " beforehand. resetToRoot must not clear the obligation set -- the "
                         + "parents upstream are still waiting on those, and the certificates are "
                         + "in this robot's inbox with nowhere to go.");
+    }
+
+    /**
+     * A promotion must not throw away the corners a builder already closed.
+     *
+     * <p>This is the payoff for builders tracking corners at all, and the single place it can be
+     * silently undone. {@code initializeEdgeMap()} clears the map and sets every corner back to
+     * {@code unattempted}; run it on the promotion path and a builder arrives as a root having
+     * forgotten every face it helped close, then re-derives each one with a certificate of its own.
+     * Nothing else would look wrong -- the lattice still converges, just slower -- which is exactly
+     * why it is pinned here.
+     *
+     * <p>{@code acceptPromotion} therefore asks two separate questions. "Am I already a root?" is
+     * {@code role == CycleRole.root}. "Do I have a corner map yet?" is the map-emptiness test, and
+     * it is what decides whether to build one -- yes for a robot promoted straight from
+     * unassigned, no for a builder that made its map when it took its site.
+     */
+    @Test
+    @DisplayName("a promoted builder keeps the corners it closed while building")
+    void aPromotedBuilderKeepsItsClosedCorners() {
+        List<GeometricCycleLatticeRobot> robots =
+                LatticeHarness.placeOnFace(SQUARE, firstOutgoingEdge(), new OrientedPoint(0, 0, 0));
+        robots.get(0).promoteToPrimaryRoot();
+
+        // Watch each robot for the transition into root, and compare what it had closed on the
+        // activation before against what it holds on the activation after.
+        List<TickRecord> records = LatticeHarness.tick(robots, 240);
+
+        boolean sawAPromotionWithMarks = false;
+        for (TickRecord record : records) {
+            if (record.before().role() == CycleRole.cycleBuilder
+                    && record.after().role() == CycleRole.root) {
+                Set<Integer> closedBefore = completeCorners(record.before());
+                Set<Integer> closedAfter = completeCorners(record.after());
+                if (closedBefore.isEmpty()) {
+                    continue;   // nothing to lose on this promotion; not the case under test
+                }
+                sawAPromotionWithMarks = true;
+                assertTrue(closedAfter.containsAll(closedBefore),
+                        "robot " + record.robotId() + " was promoted at tick " + record.tick()
+                                + " holding closed corners " + closedBefore + " and came out with "
+                                + closedAfter + ". A promotion leaves the robot exactly where it "
+                                + "was standing, so every corner it had closed is still closed. "
+                                + "initializeEdgeMap must not run on this path.");
+            }
+        }
+
+        assertTrue(sawAPromotionWithMarks,
+                "no builder was ever promoted while holding a closed corner, so this run never "
+                        + "exercised the property. Builders are meant to record their corner when "
+                        + "the closing status laps them, well before they are promoted.");
+    }
+
+    /** The corners this snapshot has closed. */
+    private static Set<Integer> completeCorners(org.utils.logging.CommsSnapshot snapshot) {
+        Set<Integer> closed = new java.util.HashSet<>();
+        snapshot.completedCycles().forEach((edgeId, status) -> {
+            if (status == CycleStatus.complete) {
+                closed.add(edgeId);
+            }
+        });
+        return closed;
     }
 }

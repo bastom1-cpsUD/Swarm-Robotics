@@ -147,6 +147,32 @@ class CycleStatusBookkeepingTest {
     }
 
     /**
+     * Taking a new assignment wipes the corners of the old site, before the new map is built.
+     *
+     * <p>Builders carry a corner map now, so this path matters in a way it did not when only roots
+     * did: {@code acceptFirstAssignment} calls {@code initializeEdgeMap()} straight after
+     * {@code setAssignedEdge}, and it must be filling a <em>clean</em> map rather than merging into
+     * whatever the robot was tracking at a site it has just left. {@code resetToCycleBuilder} is
+     * what guarantees that, by calling {@code forgetTrackedCorners()} first.
+     */
+    @Test
+    @DisplayName("taking a new assignment forgets the corners of the previous site")
+    void becomingABuilderForgetsTheOldCornerMap() {
+        CyclebuilderComms comms = standalone(SQUARE);
+        comms.promoteToPrimaryRoot();
+        assertFalse(trackedAmong(comms, allEdgeIds(SQUARE)).isEmpty(),
+                "scenario error: a root should be tracking corners before it takes a new assignment");
+
+        comms.resetToCycleBuilder();
+
+        assertTrue(trackedAmong(comms, allEdgeIds(SQUARE)).isEmpty(),
+                "a robot taking an assignment somewhere else kept the corners of the site it left. "
+                        + "acceptFirstAssignment builds the new map immediately afterwards, so "
+                        + "anything surviving here is silently merged into the bookkeeping for a "
+                        + "different site.");
+    }
+
+    /**
      * The multi-role case, which is the only one where this is visible at all.
      *
      * <p>{@code initializeEdgeMap} adds one entry per outgoing edge of the current role. On a

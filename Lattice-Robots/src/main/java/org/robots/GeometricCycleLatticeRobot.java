@@ -46,7 +46,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
      * Robot activations per second. One activation is one <em>tick</em>.
      */
     public static final double DEFAULT_TICK_RATE = 1.0;
-    public static final VoltageGraph GRAPH = TriangleVoltageGraph.build();
+    public static final VoltageGraph GRAPH = SnubSquareVoltageGraph.build();
     private static volatile double currentTickRate = DEFAULT_TICK_RATE;
 
     /**

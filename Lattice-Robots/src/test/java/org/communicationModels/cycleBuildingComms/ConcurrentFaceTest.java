@@ -257,6 +257,47 @@ class ConcurrentFaceTest {
     }
 
     /**
+     * A cycleBuilder on a closed face records its own corner, without waiting to be promoted.
+     *
+     * <p>The status wraps the whole face after a closure precisely so that every participant can
+     * mark it, and until builders tracked corners that delivery was thrown away: the map they would
+     * have written into was empty until promotion created it, so {@code markCornerFromStatus}
+     * silently returned. Measured on this very scenario, robots 1 and 2 then each re-derived the
+     * same face from scratch after promotion -- minting a certificate and running a full lap -- and
+     * robot 3 had not managed it in 80 ticks.
+     *
+     * <p>One seeded root, so the other three sites are filled by robots that get recruited and are
+     * still {@code cycleBuilder} when the closure laps them. A run where everyone starts as a root
+     * would pass on the old behaviour too.
+     */
+    @Test
+    @DisplayName("a cycleBuilder on a closed face marks its own corner, before any promotion")
+    void buildersRecordTheirCornerOnTheWrappingStatus() {
+        List<GeometricCycleLatticeRobot> robots =
+                LatticeHarness.placeOnFace(SQUARE, firstOutgoingEdge(SQUARE), new OrientedPoint(0, 0, 0));
+        robots.get(0).promoteToPrimaryRoot();
+
+        List<TickRecord> records = LatticeHarness.tick(robots, LONG_RUN);
+
+        Set<Integer> buildersThatMarked = new HashSet<>();
+        for (TickRecord record : records) {
+            if (record.after().role() != CycleRole.cycleBuilder) {
+                continue;
+            }
+            if (record.after().completedCycles().containsValue(CycleStatus.complete)) {
+                buildersThatMarked.add(record.robotId());
+            }
+        }
+
+        assertEquals(3, buildersThatMarked.size(),
+                "only " + buildersThatMarked + " of the three recruited builders ever recorded a "
+                        + "corner while still building. The closing status laps the entire face so "
+                        + "that every participant can mark it; a builder with no corner map takes "
+                        + "the delivery and drops it, and then has to re-derive the same face with "
+                        + "a certificate of its own after promotion.");
+    }
+
+    /**
      * Several roots on one face, all building it at once. <strong>They no longer collapse to
      * one.</strong>
      *

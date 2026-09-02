@@ -76,15 +76,17 @@ public record RobotFrameView(TickRecord rec, List<OrientedPoint> trajectory) imp
     }
 
     /**
-     * The root-only progress lines appended to the summary block: how many of
-     * this robot's faces are still open, and where each one stands.
+     * The progress lines appended to the summary block: how many of this
+     * robot's faces are still open, and where each one stands.
      *
      * <p>Empty for any robot with no cycle bookkeeping (see
-     * {@link CommsSnapshot#tracksCycles()}), so unassigned robots and
-     * cycleBuilders — for which the counts would be a meaningless
-     * {@code 0 of 0} — get no line at all. The "before" side reads {@code n/a}
-     * on the tick a robot is promoted to root, since its edge map did not exist
-     * yet when that snapshot was taken.</p>
+     * {@link CommsSnapshot#tracksCycles()}), which now means only
+     * {@code unassigned} robots — for which the counts would be a meaningless
+     * {@code 0 of 0}. Builders track the corners of the site they took, so
+     * these lines appear for them as well, and show a face closing while the
+     * robot is still a builder. The "before" side reads {@code n/a} on the tick
+     * a robot first takes a site, since its edge map did not exist yet when
+     * that snapshot was taken.</p>
      */
     private String cycleProgress() {
         if (!rec.before().tracksCycles() && !rec.after().tracksCycles()) {
