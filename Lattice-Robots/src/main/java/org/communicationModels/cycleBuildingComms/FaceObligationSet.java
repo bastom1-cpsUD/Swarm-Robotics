@@ -282,35 +282,29 @@ public class FaceObligationSet {
     }
 
     /**
-     * The link this robot offered to that child <em>for this particular walk</em>, falling back to
-     * the child alone when nothing records the walk.
+     * The obligation this robot offered to that child, carried or its own.
      *
-     * <p>Needed because the attempt is allowed to duplicate a carried link. A root building corner
-     * {@code c} and relaying somebody else's walk that also owes {@code c} offers both to the same
-     * neighbour, so two tuples name that child -- and {@link #findByChild} answers with the carried
-     * one, because it scans {@link #carried} first. A response routed through the wrong one of the
-     * two marks the wrong corner and travels to the wrong parent.
+     * <p><strong>Carried before the attempt, and callers depend on that order.</strong> The attempt
+     * is allowed to duplicate a carried link -- a root building corner {@code c} while relaying
+     * somebody else's walk that also owes {@code c} offers both to the same neighbour -- so two
+     * tuples can name one child.
      *
-     * <p>{@link FaceObligation#getInFlightInitiator()} separates them: it records who minted the
-     * walk each link most recently carried, and the two duplicates are carrying different walks or
-     * they would not be duplicates. The fallback keeps behaviour unchanged wherever nothing is
-     * ambiguous -- a response whose walk this robot has already forgotten still routes by child,
-     * which is what it did before this existed.
+     * <p>There used to be a {@code findByChildForWalk} that separated them by asking which walk each
+     * link most recently carried. It is gone, along with the field it read, because every caller now
+     * answers the question from the <em>message</em> instead:
+     *
+     * <ul>
+     *   <li>A status returns early on {@code initiatorId == self}, so one reaching this lookup is
+     *       never for this robot's own attempt.</li>
+     *   <li>A rejection carries the certificate, which names its own minter, so the rejecting
+     *       robot's own attempt is recognised before this is called.</li>
+     *   <li>A lost-certificate report wants the carried link -- it is climbing to a parent -- and
+     *       cancels the duplicate attempt on a separate test of its own.</li>
+     * </ul>
+     *
+     * <p>Which is the better founded arrangement: a fact carried by the message rather than mutable
+     * state on the link, whose single slot silently dropped every walk but the last.
      */
-    public FaceObligation findByChildForWalk(int childId, int initiatorId) {
-        for (FaceObligation obligation : carried) {
-            if (obligation.matchesChild(childId) && obligation.getInFlightInitiator() == initiatorId) {
-                return obligation;
-            }
-        }
-        if (myAttemptedCycle != null && myAttemptedCycle.matchesChild(childId)
-                && myAttemptedCycle.getInFlightInitiator() == initiatorId) {
-            return myAttemptedCycle;
-        }
-        return findByChild(childId);
-    }
-
-    /** The obligation this robot offered to that child, carried or its own. */
     public FaceObligation findByChild(int childId) {
         for (FaceObligation obligation : carried) {
             if (obligation.matchesChild(childId)) {

@@ -104,8 +104,11 @@ class CornerRearmingTest {
             }
         }
         assertNotNull(attempt, "scenario error: the seed never got a walk of its own in flight");
+        // Stamped with the attempt's own edge, which is what the report has to name for the seed to
+        // recognise the broken walk as its own: an attempt is keyed on the outgoing edge it builds,
+        // so that edge is both what it owes and what it offered the child now reporting the loss.
         seed.enqueueMessage(new CertificateLostMessage(attempt.getChildId(), seed.getRobotId(),
-                SQUARE.getPrimaryRole().getId(), attempt.getEdgeId(), seed.getRobotId()));
+                attempt.getEdgeId()));
 
         records.addAll(LatticeHarness.tick(robots, LONG_RUN));
         List<StatusChange> changes = statusChanges(records);

@@ -77,29 +77,27 @@ public class FaceObligation {
      */
     public static final int NO_PARENT = -1;
 
-    /** {@link #getInFlightInitiator()} value meaning "no walk has been sent over this link yet". */
-    public static final int NO_INITIATOR = -1;
-
     private final int parentId;
     private final int edgeId;
 
     private Integer childId;
 
-    /**
-     * Who minted the walk most recently sent over this link.
-     *
-     * <p><strong>An id, deliberately, and not the certificate.</strong> The class contract above
-     * says a certificate is never stored here, and it still is not: two certificates can target one
-     * edge before either is answered, so a slot holding one of them would silently drop the other.
-     * A single scalar has no such failure -- it is overwritten by the next offer, which is exactly
-     * the walk a loss report would be about.
-     *
-     * <p>It exists because relaying became inline. A robot forwards the certificate in the same
-     * activation it reads it and keeps no copy, so when its child later vanishes it has nothing
-     * left to name the walk with -- and a {@code CertificateLostMessage} that cannot name its
-     * initiator cannot be routed to the only robot able to mint a replacement.
-     */
-    private int inFlightInitiatorId = NO_INITIATOR;
+    // Nothing here records which walk is in flight, and nothing should.
+    //
+    // There used to be an `inFlightInitiatorId`: the minter of the most recent walk sent over this
+    // link, stamped by every offer, so that a departed child could be reported to the robot able to
+    // mint a replacement. One scalar, and its javadoc said so plainly -- "the latest wins".
+    //
+    // But a link carries SEVERAL walks at once. Two roots racing to build the same face both push
+    // walks through this link, the second offer overwrote the first's record, and the loss went to
+    // whichever root offered last while the other sat on an attempt that would never resolve. The
+    // slot could not be widened into a set either, because the routing it fed was the problem, not
+    // its width: a report addressed to one robot is the wrong shape for news that concerns all of
+    // them.
+    //
+    // CertificateLostMessage is addressed to nobody now. It climbs the parent chain and every root
+    // on it cancels its own attempt, so no link has to remember whose walk it carried -- see that
+    // class for why the parent chain is exactly the set of walks that died.
 
     // No visualization edge is held here any more. There used to be one, so that undoing a
     // speculative offer could remove exactly the object that offer had drawn, by reference,
@@ -174,22 +172,6 @@ public class FaceObligation {
         return edgeId;
     }
 
-    /**
-     * Records who minted the walk just sent over this link, so a later loss report can name it.
-     * Called by every offer; the latest wins, which is the walk in flight.
-     */
-    public void setInFlightInitiator(int initiatorId) {
-        this.inFlightInitiatorId = initiatorId;
-    }
-
-    /**
-     * The minter of the most recent walk sent over this link, or {@link #NO_INITIATOR} if none has
-     * been. See the field for why this is an id rather than the certificate itself.
-     */
-    public int getInFlightInitiator() {
-        return inFlightInitiatorId;
-    }
-
     /** Excludes a robot from this face only. A ban on one face says nothing about another. */
     public void ban(int bannedId) {
         this.unableToDoAssignmentIds.add(bannedId);
@@ -205,7 +187,7 @@ public class FaceObligation {
     }
 
     /**
-     * Forgets every exclusion on this link, and clears the in-flight walk with them.
+     * Forgets every exclusion on this link, the walk that accumulated them having resolved.
      *
      * <p><strong>A ban is scoped to one walk, not to the link.</strong> It exists to make a single
      * offer sequence finite -- offer, refuse, ban, offer the next candidate -- and once that walk
@@ -221,7 +203,6 @@ public class FaceObligation {
      */
     public void clearForResolvedWalk() {
         this.unableToDoAssignmentIds.clear();
-        this.inFlightInitiatorId = NO_INITIATOR;
     }
 
     @Override

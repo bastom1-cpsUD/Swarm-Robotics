@@ -1,8 +1,12 @@
 package org.communicationModels.cycleBuildingComms;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
+import org.communicationModels.cycleBuildingComms.Messages.CertificateLostMessage;
 import org.communicationModels.cycleBuildingComms.Messages.PositioningMessage;
 import org.communicationModels.cycleBuildingComms.Messages.RejectAssignmentMessage;
 import org.communicationModels.cycleBuildingComms.Messages.StatusMessage;
@@ -176,7 +180,8 @@ class DuplicateCertificateRaceTest {
 
         // A status for SOMEBODY ELSE'S walk: relayed, and this robot's own attempt untouched.
         seed.enqueueMessage(new StatusMessage(link.getChildId(), seed.getRobotId(), true,
-                incoming.getOrigin().getId(), incoming.getId(), 999, new VoltageCertificate(999)));
+                incoming.getOrigin().getId(), incoming.getId(), 999,
+                SQUARE.getNext(incoming).getId(), new VoltageCertificate(999)));
         TickRecord relayed = seed.executeTimeStep(1.0, 100);
         assertTrue(relayed.processedDescription().contains("RELAYED"),
                 "a status for robot 999's walk was not relayed onward: "
@@ -188,7 +193,7 @@ class DuplicateCertificateRaceTest {
 
         // Now one for the seed's OWN walk: consumed, corner recorded, attempt dropped.
         seed.enqueueMessage(new StatusMessage(ownChild, seed.getRobotId(), true,
-                SQUARE.getPrimaryRole().getId(), corner, seed.getRobotId(),
+                SQUARE.getPrimaryRole().getId(), corner, seed.getRobotId(), corner,
                 new VoltageCertificate(seed.getRobotId())));
         TickRecord settled = seed.executeTimeStep(1.0, 101);
         assertFalse(settled.processedDescription().contains("RELAYED"),
@@ -383,7 +388,7 @@ class DuplicateCertificateRaceTest {
         // Now the refusal, for the seed's OWN walk -- so it routes through the attempt, not through
         // the link just built.
         seed.enqueueMessage(new RejectAssignmentMessage(refuser, seed.getRobotId(),
-                SQUARE.getPrimaryRole().getId(), attempt.getEdgeId(), false,
+                SQUARE.getPrimaryRole().getId(), attempt.getEdgeId(), false, attempt.getEdgeId(),
                 new VoltageCertificate(seed.getRobotId())));
         seed.executeTimeStep(1.0, 100);
 
@@ -418,7 +423,7 @@ class DuplicateCertificateRaceTest {
         assertTrue(hasEdgeTo(seed, refuser), "scenario error: the offer should have drawn an edge");
 
         seed.enqueueMessage(new RejectAssignmentMessage(refuser, seed.getRobotId(),
-                SQUARE.getPrimaryRole().getId(), attempt.getEdgeId(), false,
+                SQUARE.getPrimaryRole().getId(), attempt.getEdgeId(), false, attempt.getEdgeId(),
                 new VoltageCertificate(seed.getRobotId())));
         seed.executeTimeStep(1.0, 100);
 
@@ -523,5 +528,307 @@ class DuplicateCertificateRaceTest {
                 "robot " + gone + " left range and kept its edge. The sweep releases the link's "
                         + "child slot and only then undraws; if those run the other way round the "
                         + "link still vouches for the robot that left and the line never goes.");
+    }
+
+    /**
+     * <strong>The regression this whole mechanism exists for.</strong>
+     *
+     * <p>A robot is told about a broken walk it did not mint, and must act on it -- because the link
+     * that broke was carrying its own walk too. Two roots racing one face share every link along
+     * that face by construction: a root building corner {@code c} while relaying somebody else's
+     * walk that also owes {@code c} offers both to the same neighbour, so both certificates travel
+     * over one link and both die if that neighbour leaves.
+     *
+     * <p>The report used to name the robot that minted the lost walk, and a link recorded exactly
+     * one walk in flight, so the second certificate across it erased the first's identity. Whichever
+     * root was not named never heard: its attempt slot stayed open, {@code hasInitiatedFaceInFlight}
+     * stayed true, and it answered {@code N/A (Already building a face of my own)} for the rest of
+     * the run. That is a permanent stall, and it is what ended robots 6, 63 and 73 in
+     * {@code sim-2026-09-01T22-59-58}.
+     *
+     * <p>Widening that record into a set would not have fixed it, which is why the message is
+     * addressed to nobody at all. The two assertions here are the two halves of that: the receiver
+     * acts on a report about a stranger's walk, and it passes the report on rather than consuming
+     * it, because the robots above it are in exactly the same position.
+     */
+    @Test
+    @DisplayName("a root cancels its own attempt on a report about a walk it did not mint")
+    void aRootIsCancelledByAReportItDidNotMint() {
+        List<GeometricCycleLatticeRobot> robots = neighbourhood();
+        GeometricCycleLatticeRobot seed = robots.get(0);
+
+        FaceObligation attempt = attemptInFlight(seed);
+        assertNotNull(attempt, "scenario error: the seed never got a walk of its own in flight");
+        int corner = attempt.getEdgeId();
+        int ownChild = attempt.getChildId();
+
+        // A second walk, minted by robot 999, arriving over the edge that owes the same corner --
+        // so the seed relays it to the robot its own walk already went to, over the same link.
+        HalfEdge incoming = arrivesOwing(SQUARE.getHalfEdgeById(corner));
+        assertNotNull(incoming, "scenario error: no incoming edge owes corner " + corner);
+        GeometricCycleLatticeRobot sender = occupantOf(robots, incoming.getTwin());
+        assertNotNull(sender, "scenario error: nobody stands where that walk must come from");
+        seed.enqueueMessage(new PositioningMessage(sender.getRobotId(), seed.getRobotId(),
+                incoming.getOrigin().getId(), incoming.getId(),
+                incoming.getOrigin().getId(), incoming.getId(),
+                new VoltageCertificate(999)));
+        FaceObligation link = null;
+        for (int tick = 50; tick <= 70 && link == null; tick++) {
+            for (FaceObligation o : seed.executeTimeStep(1.0, tick).after().obligations()) {
+                if (o.getParentId() == sender.getRobotId() && o.getChildId() != null) {
+                    link = o;
+                }
+            }
+        }
+        assertNotNull(link, "scenario error: the seed never carried robot 999's walk onward");
+        assertEquals(ownChild, (int) link.getChildId(),
+                "scenario error: robot 999's walk and the seed's own went to different robots, so "
+                        + "they are not sharing a link and there is no duplicate here to test");
+
+        // The shared child leaves with both certificates, and its report names the edge it was
+        // offered -- not a minter.
+        List<TickRecord> records = new ArrayList<>();
+        seed.enqueueMessage(new CertificateLostMessage(ownChild, seed.getRobotId(), corner));
+        records.add(seed.executeTimeStep(1.0, 100));
+
+        assertEquals(CycleStatus.attempted, records.get(0).after().completedCycles().get(corner),
+                "the seed's own walk on corner " + corner + " went into robot " + ownChild
+                        + " and died there, and its corner was left alone because the report was "
+                        + "about robot 999's certificate rather than its own. A robot cannot be "
+                        + "told only about walks it minted: one link carries several at once and "
+                        + "they all die together.");
+        // Not "no attempt at all": a freed root opens its next face in the same activation, which
+        // is the point of freeing it. What must be gone is the attempt on the corner that died --
+        // while that is held, hasInitiatedFaceInFlight() stays true and nothing will ever resolve
+        // it, because the certificate it is waiting on left with robot ownChild.
+        assertFalse(records.get(0).after().obligations().stream()
+                        .anyMatch(o -> o.getParentId() == FaceObligation.NO_PARENT
+                                && o.getEdgeId() == corner),
+                "the seed parked corner " + corner + " but kept the attempt on it open, so it is "
+                        + "still waiting on a certificate that no longer exists");
+
+        assertTrue(LatticeHarness.messagesOfType(records, "Certificate Lost").stream()
+                        .anyMatch(m -> m.recipientId() == sender.getRobotId()),
+                "the seed cancelled its own attempt and then swallowed the report. It has to climb: "
+                        + "every robot whose walk crossed the broken link is above it on the parent "
+                        + "chain, and each is holding an attempt that will otherwise never resolve. "
+                        + "Sent: " + records.get(0).sent());
+    }
+
+    /**
+     * The other half of the same guard: a report passing through does <em>not</em> cancel a root's
+     * walk on a face that did not break.
+     *
+     * <p>Over-cancelling is not the safe direction. A live walk whose attempt has been forgotten
+     * comes home to {@code settleOwnWalk}, finds no attempt, and is dropped as already settled --
+     * so a face that genuinely closed goes unrecorded and the whole lap is re-run. Which is why the
+     * cancellation tests two things and not one: the attempt must owe the edge the report names,
+     * <em>and</em> be bound to the robot that sent it.
+     *
+     * <p>Driven by injecting the report rather than waiting for a departure, because the point is a
+     * report the receiver should ignore, and a scenario that produced one emergently would be
+     * testing the scenario.
+     */
+    @Test
+    @DisplayName("a lost-certificate report leaves an attempt on a different face alone")
+    void aReportOnAnotherFaceDoesNotCancelMyAttempt() {
+        List<GeometricCycleLatticeRobot> robots = neighbourhood();
+        GeometricCycleLatticeRobot seed = robots.get(0);
+
+        FaceObligation attempt = attemptInFlight(seed);
+        assertNotNull(attempt, "scenario error: the seed never got a walk of its own in flight");
+        int corner = attempt.getEdgeId();
+        int child = attempt.getChildId();
+
+        // A report naming a DIFFERENT corner of this same robot: a face it is not building.
+        int otherCorner = -1;
+        for (HalfEdge outgoing : SQUARE.getOutgoingHalfEdges(SQUARE.getPrimaryRole())) {
+            if (outgoing.getId() != corner) {
+                otherCorner = outgoing.getId();
+            }
+        }
+        assertNotEquals(-1, otherCorner, "scenario error: the lattice has only one corner");
+
+        seed.enqueueMessage(new CertificateLostMessage(child, seed.getRobotId(), otherCorner));
+        TickRecord record = seed.executeTimeStep(1.0, 100);
+
+        assertTrue(record.after().obligations().stream()
+                        .anyMatch(o -> o.getParentId() == FaceObligation.NO_PARENT
+                                && o.getEdgeId() == corner),
+                "a report about corner " + otherCorner + " cancelled the seed's live attempt on "
+                        + corner + ". The attempt must owe the edge the report names before it is "
+                        + "touched -- its own walk is still out there, and a status coming home to "
+                        + "a robot that has forgotten the attempt is dropped as already settled, "
+                        + "so a face that closed is never recorded.");
+        assertNotEquals(CycleStatus.attempted, record.after().completedCycles().get(corner),
+                "the seed parked its live corner " + corner + " as attempted on the strength of a "
+                        + "report about a different face");
+    }
+
+    /**
+     * A return message is routed by the <em>edge</em> it came back over, not by who sent it.
+     *
+     * <p>One robot can hold two links to the same neighbour: it relays one face to that robot over
+     * one edge and another face over another, and both tuples name it as their child. "The tuple
+     * whose child sent this" therefore does not identify a link, and choosing the wrong one marks
+     * the wrong corner complete and forwards the verdict to a robot that was never on that walk --
+     * silently, because nothing in either message contradicts the mistake.
+     *
+     * <p>{@code FaceObligation.inFlightInitiatorId} used to break the tie by recording who minted
+     * each link's latest walk. It broke it only sometimes: one slot per link, overwritten by the
+     * next certificate across it, which is the same single-slot flaw that stranded roots when a walk
+     * died. {@link StatusMessage#getViaEdgeId()} replaces it with something exact and stateless --
+     * exactly one tuple owes a given edge onward.
+     *
+     * <p>The two links here are built with a loitering robot that is nearest candidate for both
+     * owed edges and is never activated, so it accepts nothing and both links stay bound to it.
+     */
+    @Test
+    @DisplayName("a status routes by the edge it came back over, not by which robot sent it")
+    void aStatusRoutesByEdgeNotBySender() {
+        // Two arrival edges chosen by property rather than by index: neither walk may owe an edge
+        // whose site one of the two parents is standing on, or that parent is the exact occupant
+        // and gets picked as the child instead of the loiterer -- and then the seed holds two links
+        // to two different robots, which is the case that needs no disambiguating.
+        List<HalfEdge> outgoing = SQUARE.getOutgoingHalfEdges(SQUARE.getPrimaryRole());
+        HalfEdge firstIn = null;
+        HalfEdge secondIn = null;
+        for (HalfEdge a : outgoing) {
+            for (HalfEdge b : outgoing) {
+                int owedA = SQUARE.getNext(a.getTwin()).getId();
+                int owedB = SQUARE.getNext(b.getTwin()).getId();
+                boolean clear = owedA != a.getId() && owedA != b.getId()
+                        && owedB != a.getId() && owedB != b.getId();
+                if (a.getId() != b.getId() && clear && firstIn == null) {
+                    firstIn = a.getTwin();
+                    secondIn = b.getTwin();
+                }
+            }
+        }
+        assertNotNull(firstIn,
+                "scenario error: no pair of arrival edges leaves both owed sites unoccupied");
+
+        OrientedPoint origin = new OrientedPoint(0, 0, 0);
+        GeometricCycleLatticeRobot seed = new GeometricCycleLatticeRobot(0, origin, SQUARE);
+        GeometricCycleLatticeRobot firstParent = new GeometricCycleLatticeRobot(1,
+                new RigidBodyTransformation(origin).compose(firstIn.getTwin().getVoltage()).asPose(),
+                SQUARE);
+        GeometricCycleLatticeRobot secondParent = new GeometricCycleLatticeRobot(2,
+                new RigidBodyTransformation(origin).compose(secondIn.getTwin().getVoltage()).asPose(),
+                SQUARE);
+        // Off-lattice, so it is nobody's exact occupant and stays the nearest candidate for both
+        // owed edges. Never ticked, so it never answers and never releases either binding.
+        GeometricCycleLatticeRobot loiterer =
+                new GeometricCycleLatticeRobot(3, new OrientedPoint(20, 12, 0), SQUARE);
+        LatticeHarness.makeAllNeighbors(List.of(seed, firstParent, secondParent, loiterer));
+        seed.promoteToPrimaryRoot();
+
+        seed.enqueueMessage(new PositioningMessage(firstParent.getRobotId(), seed.getRobotId(),
+                firstIn.getOrigin().getId(), firstIn.getId(),
+                firstIn.getOrigin().getId(), firstIn.getId(), new VoltageCertificate(999)));
+        for (int tick = 1; tick <= 6; tick++) {
+            seed.executeTimeStep(1.0, tick);
+        }
+        seed.enqueueMessage(new PositioningMessage(secondParent.getRobotId(), seed.getRobotId(),
+                secondIn.getOrigin().getId(), secondIn.getId(),
+                secondIn.getOrigin().getId(), secondIn.getId(), new VoltageCertificate(888)));
+        TickRecord staged = null;
+        for (int tick = 7; tick <= 14; tick++) {
+            staged = seed.executeTimeStep(1.0, tick);
+        }
+
+        List<FaceObligation> links = new ArrayList<>();
+        for (FaceObligation o : staged.after().obligations()) {
+            if (o.getParentId() != FaceObligation.NO_PARENT
+                    && o.getChildId() != null && o.getChildId() == loiterer.getRobotId()) {
+                links.add(o);
+            }
+        }
+        assertEquals(2, links.size(),
+                "scenario error: the seed should hold two links to robot " + loiterer.getRobotId()
+                        + ", one per relayed walk. Held: " + staged.after().obligations());
+
+        // The SECOND link in insertion order, deliberately: routing by child scans the carried list
+        // in order, so naming the first would be answered correctly by either rule and prove
+        // nothing.
+        FaceObligation target = links.get(1);
+        FaceObligation other = links.get(0);
+        int targetCorner = SQUARE.getNext(SQUARE.getHalfEdgeById(target.getEdgeId())).getId();
+        int otherCorner = SQUARE.getNext(SQUARE.getHalfEdgeById(other.getEdgeId())).getId();
+
+        List<TickRecord> records = new ArrayList<>();
+        seed.enqueueMessage(new StatusMessage(loiterer.getRobotId(), seed.getRobotId(), true,
+                // viaEdgeId is the edge the SENDER was offered, which is the edge this link owes
+                // onward -- not the link's own key, which is what the seed was offered.
+                SQUARE.getPrimaryRole().getId(), targetCorner, 888, targetCorner,
+                new VoltageCertificate(888)));
+        records.add(seed.executeTimeStep(1.0, 100));
+
+        assertTrue(LatticeHarness.messagesOfType(records, "Status").stream()
+                        .anyMatch(m -> m.recipientId() == target.getParentId()),
+                "the status came back over the link for edge " + target.getEdgeId()
+                        + " and should have gone on to robot " + target.getParentId()
+                        + ", the parent of that link. Both of the seed's links name robot "
+                        + loiterer.getRobotId() + " as their child, so routing by sender picks "
+                        + "whichever was opened first and sends the verdict to a robot that was "
+                        + "never on this walk. Sent: " + records.get(0).sent());
+        assertEquals(CycleStatus.complete, records.get(0).after().completedCycles().get(targetCorner),
+                "the corner owed by the link the status arrived over was not recorded");
+        assertNotEquals(CycleStatus.complete, records.get(0).after().completedCycles().get(otherCorner),
+                "corner " + otherCorner + " was marked complete by a status that belongs to the "
+                        + "other link. That corner's own walk is still out there, and a face "
+                        + "recorded as built on somebody else's verdict is never built at all.");
+    }
+
+    /**
+     * The second half of the cancellation guard: the report must come from the robot the attempt
+     * was actually handed to, not merely name an edge the attempt owes.
+     *
+     * <p>An attempt can be re-offered. Its first candidate refuses, the certificate goes to somebody
+     * else, and the attempt is now bound to a different robot -- while the refuser still holds a
+     * permanent link on that same edge, because links outlive the walks that open them. A loss
+     * report from that refuser names the right edge and the wrong walk.
+     *
+     * <p><strong>This costs something, and the cost is deliberate.</strong> If the attempt's own
+     * certificate really did travel through the reporter before the re-offer, this declines to
+     * cancel a walk that is dead, and that corner waits for a timeout that does not exist yet. The
+     * alternative is worse: cancelling on the edge alone abandons attempts whose walks are alive,
+     * and a status coming home to a robot that has forgotten its attempt is dropped as already
+     * settled -- so a face that genuinely closed is never recorded anywhere and is rebuilt from
+     * scratch. A missed cancellation is one corner waiting; a wrong one is a face silently lost.
+     */
+    @Test
+    @DisplayName("a report from a robot the attempt was not handed to leaves it alone")
+    void aReportFromTheWrongChildDoesNotCancelMyAttempt() {
+        List<GeometricCycleLatticeRobot> robots = neighbourhood();
+        GeometricCycleLatticeRobot seed = robots.get(0);
+
+        FaceObligation attempt = attemptInFlight(seed);
+        assertNotNull(attempt, "scenario error: the seed never got a walk of its own in flight");
+        int corner = attempt.getEdgeId();
+        int ownChild = attempt.getChildId();
+
+        GeometricCycleLatticeRobot stranger = null;
+        for (GeometricCycleLatticeRobot robot : robots) {
+            if (robot.getRobotId() != seed.getRobotId() && robot.getRobotId() != ownChild) {
+                stranger = robot;
+            }
+        }
+        assertNotNull(stranger, "scenario error: no robot other than the seed's own child");
+
+        // Right edge, wrong sender: the seed's certificate went to ownChild, not to this robot.
+        seed.enqueueMessage(new CertificateLostMessage(stranger.getRobotId(), seed.getRobotId(),
+                corner));
+        TickRecord record = seed.executeTimeStep(1.0, 100);
+
+        assertTrue(record.after().obligations().stream()
+                        .anyMatch(o -> o.getParentId() == FaceObligation.NO_PARENT
+                                && o.getEdgeId() == corner),
+                "a report from robot " + stranger.getRobotId() + " cancelled the seed's attempt on "
+                        + corner + ", though the seed handed that walk to robot " + ownChild
+                        + ". Naming the edge is not enough: an attempt is re-offered when a "
+                        + "candidate refuses, and the robot that refused keeps its link on that "
+                        + "same edge, so it can report a loss about a walk this attempt no longer "
+                        + "has anything to do with.");
     }
 }
