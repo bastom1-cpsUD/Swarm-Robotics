@@ -25,23 +25,34 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * Asynchronous simulation panel for the Song & O'Kane cycle-building algorithm.
  *
  * <h3>Activation model</h3>
- * Each robot is scheduled on a shared {@link ScheduledThreadPoolExecutor} with a
- * fixed period and a staggered initial delay:
+ * Each robot activates at a fixed period with a staggered offset:
  * <pre>
- *   delay_i = (sortedIndex_i * period) / robotCount
+ *   delay_i = period + (sortedIndex_i * period) / robotCount
  * </pre>
- * This spaces activations evenly across one full period from the first tick,
- * giving genuine asynchrony without randomness, and making runs reproducible.
+ * This spaces activations evenly across one full period, giving genuine asynchrony without
+ * randomness. {@link SimSchedule} owns that model and the clock behind it.
+ *
+ * <h3>Reproducibility</h3>
+ * <strong>This claim used to be made here and was false.</strong> The stagger was expressed as
+ * initial delays on a {@code ScheduledThreadPoolExecutor} sized by the machine's core count, so what
+ * actually ran, and in what order, was the OS scheduler's decision; and motion integrated measured
+ * elapsed time, so robots travelled different distances on every run. Both fed the nearest-candidate
+ * and position-epsilon tests that decide whether a face gets built, and the same input produced
+ * visibly different formations.
+ *
+ * <p>Logical time is now a counter rather than a reading, and the wall clock only paces playback --
+ * see {@link SimSchedule}. A run is reproducible given the same robots and the same
+ * <em>period</em>, which the speed slider still sets; moving it mid-run changes the run.
  *
  * <h3>Threading</h3>
- * One {@link ReentrantReadWriteLock} governs all shared robot state:
+ * One sim thread mutates; the EDT only reads. A {@link ReentrantReadWriteLock} keeps them apart:
  * <ul>
- *   <li><b>Write lock</b> — proximity check task (periodic), mouse drag, map mutations.</li>
- *   <li><b>Read lock</b>  — robot tick tasks (concurrent), EDT render loop.</li>
+ *   <li><b>Write lock</b> — the sim thread across each {@code advanceTo}, plus mouse drag and map
+ *       mutations on the EDT.</li>
+ *   <li><b>Read lock</b>  — the EDT render loop and hit-testing.</li>
  * </ul>
- * NOTE: {@code incomingMessages} inside {@code CommunicationSystem} must be a
- * {@link java.util.concurrent.ConcurrentLinkedQueue} because multiple robots can
- * enqueue to each other's queues while all holding the read lock simultaneously.
+ * Robots no longer tick concurrently, so {@code incomingMessages} being a
+ * {@link java.util.concurrent.ConcurrentLinkedQueue} is now belt-and-braces rather than load-bearing.
  */
 public class AsyncRobotPanel extends JPanel {
 
@@ -90,12 +101,20 @@ public class AsyncRobotPanel extends JPanel {
 
     // ------------------------------------------------------------------
     // Async execution
+    //
+    // One schedule, one thread. The staggered activation model is unchanged -- it lives in
+    // SimSchedule now rather than in a pool's timing -- but the wall clock no longer decides
+    // anything except how fast a human watches. See SimSchedule for why that had to change.
     // ------------------------------------------------------------------
-    private ScheduledThreadPoolExecutor executor;
-    private final List<ScheduledFuture<?>> robotFutures  = new ArrayList<>();
-    private ScheduledFuture<?>            proximityFuture;
-    private ScheduledFuture<?>            motionFuture;
-    private volatile long                 lastMotionNanos = System.nanoTime();
+    private final SimSchedule schedule = new SimSchedule(
+            new PanelEvents(), DEFAULT_PERIOD_MS, PROXIMITY_PERIOD_MS, RENDER_PERIOD_MS);
+    private Thread simThread;
+
+    /**
+     * The wall-clock instant that logical time zero corresponds to, moved forward across pauses.
+     * Playback pacing only -- no simulation state is derived from it.
+     */
+    private volatile long wallAnchorMs = 0;
 
     private volatile boolean simRunning  = false;
     private volatile boolean simStarted  = false;
@@ -144,6 +163,8 @@ public class AsyncRobotPanel extends JPanel {
     }
 
     public void shutdown() {
+        simRunning = false;
+        joinSimThread();
         simLogger.close();
     }
 
@@ -347,31 +368,36 @@ public class AsyncRobotPanel extends JPanel {
     private void startSimulation() {
         if (robots.isEmpty()) return;
 
-        int threads = Runtime.getRuntime().availableProcessors() + 1;
-        executor = new ScheduledThreadPoolExecutor(threads);
-        executor.setRemoveOnCancelPolicy(true);
         simStarted     = true;
-        simRunning     = true;
         simStartWallMs = System.currentTimeMillis();
-        scheduleProximityTask();
-        scheduleRobotTasks();
-        scheduleMotionTask();
-        SwingUtilities.invokeLater(() -> playPauseBtn.setText("⏸  Pause"));
+        armSchedule();
+        String identity = "Run start: period=" + periodMs + "ms, robots=" + robots.size()
+                + ", graph=" + GeometricCycleLatticeRobot.GRAPH.getClass().getSimpleName();
+        simLogger.note(identity);
+        System.out.println("[Panel] " + identity
+                + " — reproducible from these; moving the speed slider changes the run.");
+        resumeSimulation();
     }
 
     private void pauseSimulation() {
         simRunning = false;
-        cancelRobotFutures();
-        if (proximityFuture != null) proximityFuture.cancel(false);
-        if (motionFuture    != null) motionFuture.cancel(false);
+        joinSimThread();
         SwingUtilities.invokeLater(() -> playPauseBtn.setText("▶  Resume"));
     }
 
+    /**
+     * Starts the loop that walks logical time forward, pinned to where the run left off.
+     *
+     * <p>Re-anchoring rather than resetting is what makes a pause invisible to the simulation: the
+     * schedule keeps its own clock, and this only re-establishes which wall-clock instant that clock
+     * is currently level with.
+     */
     private void resumeSimulation() {
         simRunning = true;
-        scheduleProximityTask();
-        scheduleRobotTasks();
-        scheduleMotionTask();
+        wallAnchorMs = System.currentTimeMillis() - schedule.nowMs();
+        simThread = new Thread(this::runLoop, "sim-clock");
+        simThread.setDaemon(true);
+        simThread.start();
         SwingUtilities.invokeLater(() -> playPauseBtn.setText("⏸  Pause"));
     }
 
@@ -380,6 +406,7 @@ public class AsyncRobotPanel extends JPanel {
         simStarted = false;
         lock.writeLock().lock();
         try {
+            schedule.reset();
             for (GeometricCycleLatticeRobot r : robots.values()) {
                 r.clearNeighbors();
                 r.clearEdges();
@@ -396,70 +423,100 @@ public class AsyncRobotPanel extends JPanel {
     // ------------------------------------------------------------------
     // Scheduling
     // ------------------------------------------------------------------
-    private void scheduleProximityTask() {
-        proximityFuture = executor.scheduleAtFixedRate(
-                this::runProximityCheck,
-                0L, PROXIMITY_PERIOD_MS, TimeUnit.MILLISECONDS);
+
+    /** Seeds the schedule for the current swarm and period. */
+    private void armSchedule() {
+        lock.writeLock().lock();
+        try {
+            schedule.arm(new ArrayList<>(robots.keySet()), periodMs);
+        } finally { lock.writeLock().unlock(); }
     }
 
-    private void scheduleRobotTasks() {
-        List<Integer> ids;
-        lock.readLock().lock();
-        try { ids = new ArrayList<>(robots.keySet()); }
-        finally { lock.readLock().unlock(); }
-        Collections.sort(ids);
+    /**
+     * The play loop: walk logical time forward to wherever the wall clock says it should be.
+     *
+     * <p>All the wall clock does is set a target. Whether this thread gets there in one long
+     * {@code advanceTo} after a stall or in a hundred short ones, the events run in the same order
+     * with the same arguments, so a slow machine produces a slower-looking run and an identical one.
+     *
+     * <p>The write lock is held across each advance, which makes the sim the only mutator and leaves
+     * the EDT's render and drag handlers a consistent state to read.
+     */
+    private void runLoop() {
+        while (simRunning) {
+            long targetMs = System.currentTimeMillis() - wallAnchorMs;
+            lock.writeLock().lock();
+            try {
+                schedule.advanceTo(targetMs);
+            } catch (Exception e) {
+                System.out.println("\n + [Panel] Error advancing simulation");
+                e.printStackTrace();
+            } finally { lock.writeLock().unlock(); }
 
-        int n = ids.size();
-        for (int i = 0; i < n; i++) {
-            int  id           = ids.get(i);
-            long initialDelay = periodMs + (long)((double) i / n * periodMs);
-            ScheduledFuture<?> future = executor.scheduleAtFixedRate(
-                    () -> tickRobot(id),
-                    initialDelay, periodMs, TimeUnit.MILLISECONDS);
-            robotFutures.add(future);
+            try {
+                Thread.sleep(1);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return;
+            }
         }
     }
 
+    private void joinSimThread() {
+        Thread thread = simThread;
+        if (thread == null) return;
+        try {
+            thread.join(1000);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        }
+        simThread = null;
+    }
+
+    /**
+     * Re-arms the schedule after the speed slider moves.
+     *
+     * <p>The slider sets the <em>logical</em> activation period, not the playback rate, so it is
+     * part of what a run is -- {@code GeometricCycleLatticeRobot.setTickRate} derives from it and
+     * the protocol's own timing conversions read that. Two runs are therefore only comparable at the
+     * same setting, and a run whose slider moved partway through is not reproducible from its
+     * starting parameters at all. That is worth saying out loud rather than leaving as a surprise.
+     */
     private void rescheduleRobotTasks() {
-        cancelRobotFutures();
-        if (proximityFuture != null) proximityFuture.cancel(false);
-        if (motionFuture    != null) motionFuture.cancel(false);
-        scheduleProximityTask();
-        scheduleRobotTasks();
-        scheduleMotionTask();
-    }
-
-    private void cancelRobotFutures() {
-        robotFutures.forEach(f -> f.cancel(false));
-        robotFutures.clear();
+        String note = "Period changed to " + periodMs + "ms at logical t=" + schedule.nowMs()
+                + "ms — this run is no longer reproducible from its starting parameters";
+        simLogger.note(note);
+        System.out.println("[Panel] " + note);
+        armSchedule();
     }
 
     // ------------------------------------------------------------------
-    // Motion task — 30 fps, decoupled from logic tick rate
+    // Event bodies — invoked by SimSchedule, never directly
     // ------------------------------------------------------------------
-    private void scheduleMotionTask() {
-        lastMotionNanos = System.nanoTime();
-        motionFuture = executor.scheduleAtFixedRate(() -> {
-            if (!simRunning) return;
-            long now = System.nanoTime();
-            double dt = (now - lastMotionNanos) / 1_000_000_000.0;
-            lastMotionNanos = now;
-            lock.readLock().lock();
-            try {
-                for (GeometricCycleLatticeRobot robot : robots.values()) {
-                    robot.move(dt);
-                }
-            } finally { lock.readLock().unlock(); }
-        }, 0L, 1000L / RENDER_FPS, TimeUnit.MILLISECONDS);
+    private final class PanelEvents implements SimSchedule.Handler {
+        @Override public void proximity() {
+            runProximityCheck();
+        }
+
+        @Override public void tick(int robotId) {
+            tickRobot(robotId);
+        }
+
+        @Override public void motion(double dtSeconds) {
+            for (GeometricCycleLatticeRobot robot : robots.values()) {
+                robot.move(dtSeconds);
+            }
+        }
     }
 
-    // ------------------------------------------------------------------
-    // Robot tick — runs on executor thread, holds read lock
-    // ------------------------------------------------------------------
+    /**
+     * One robot's activation.
+     *
+     * <p>No {@code simRunning} check any more: whether this should run is the schedule's decision,
+     * and the step button drives the same schedule while the run is paused.
+     */
     private void tickRobot(int id) {
-        if (!simRunning) return;
         TickRecord rec = null;
-        lock.readLock().lock();
         try {
             GeometricCycleLatticeRobot robot = robots.get(id);
             if (robot == null) return;
@@ -467,36 +524,36 @@ public class AsyncRobotPanel extends JPanel {
             int tick = (int) (tickCounts.getOrDefault(id, 0L) + 1);
             rec = robot.executeTimeStep(dt, tick);
         } catch(Exception e) {
-            System.out.println("\n + [Panel] Error ticking robot " + id);  
+            System.out.println("\n + [Panel] Error ticking robot " + id);
             e.printStackTrace();
-        } finally { lock.readLock().unlock(); }
+        }
         if(rec != null) simLogger.record(rec);
 
-        // Telemetry updated outside the lock — EDT reads are display-only
         tickCounts.merge(id, 1L, Long::sum);
         lastActivatedMs.put(id, System.currentTimeMillis());
     }
 
     // ------------------------------------------------------------------
-    // Single step — called from EDT, safe to run synchronously
+    // Single step — called from EDT
     // ------------------------------------------------------------------
+    /**
+     * Advances one activation period, through the same schedule the play loop uses.
+     *
+     * <p>This used to be a second implementation of the activation model -- every robot ticked once
+     * per press, each moving immediately after its own tick -- which is not what the running
+     * simulation did. Stepping and playing therefore explored subtly different systems. Sharing
+     * {@code advanceTo} makes them agree by construction rather than by inspection.
+     */
     private void singleStep() {
         if (robots.isEmpty()) return;
-        runProximityCheck();
-        lock.readLock().lock();
+        if (!schedule.isArmed()) armSchedule();
+
+        lock.writeLock().lock();
         try {
-            double dt = periodMs / 1000.0;
-            for (Map.Entry<Integer, GeometricCycleLatticeRobot> e : robots.entrySet()) {
-                int tick = (int) (tickCounts.getOrDefault(e.getKey(), 0L) + 1);
-                TickRecord rec = e.getValue().executeTimeStep(dt, tick);
-                e.getValue().move(dt);
-                simLogger.record(rec);
-                tickCounts.merge(e.getKey(), 1L, Long::sum);
-                lastActivatedMs.put(e.getKey(), System.currentTimeMillis());
-            }
+            schedule.advanceTo(schedule.nowMs() + periodMs);
         } catch(Exception e) {
             e.printStackTrace();
-        } finally { lock.readLock().unlock(); }
+        } finally { lock.writeLock().unlock(); }
     }
 
     // ------------------------------------------------------------------

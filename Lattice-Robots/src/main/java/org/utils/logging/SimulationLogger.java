@@ -51,6 +51,20 @@ public final class SimulationLogger implements AutoCloseable {
     }
 
     /**
+     * Writes a line naming what this run <em>is</em>, so a log can be compared against another.
+     *
+     * <p>Two runs are only expected to match when they were started from the same swarm at the same
+     * activation period -- the period feeds {@code GeometricCycleLatticeRobot.setTickRate}, which
+     * the protocol's own second-to-activation conversions read, so it is part of the input and not a
+     * display preference. Recording it turns "these two logs differ" into a question with an answer.
+     */
+    public void note(String line) {
+        synchronized (logLock) {
+            log.heading(line);
+        }
+    }
+
+    /**
      * Records one robot's tick. Always extends that robot's trajectory
      * (so the trail drawn later has no gaps), but only writes an HTML entry
      * if the tick actually changed something, or if

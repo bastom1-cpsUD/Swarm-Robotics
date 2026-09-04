@@ -46,7 +46,7 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
      * Robot activations per second. One activation is one <em>tick</em>.
      */
     public static final double DEFAULT_TICK_RATE = 1.0;
-    public static final VoltageGraph GRAPH = TriangleVoltageGraph.build();
+    public static final VoltageGraph GRAPH = SnubSquareVoltageGraph.build();
     private static volatile double currentTickRate = DEFAULT_TICK_RATE;
 
     /**
@@ -424,6 +424,22 @@ public class GeometricCycleLatticeRobot extends Robot implements Communicatable 
 
     public CycleRole getRole() {
         return commsSystem.getRole();
+    }
+
+    /**
+     * This robot's protocol state, for readers outside the tick loop.
+     *
+     * <p>{@link #executeTimeStep} already hands a pair of these to the logger, but only around an
+     * activation. This exposes the same view at an arbitrary moment, which is what a state digest
+     * needs -- see {@code SwarmDigest}, which folds it to a hash so two runs can be compared for
+     * exact equality.
+     *
+     * <p><strong>Read it, do not hold it.</strong> {@code CommsSnapshot} copies its maps but its
+     * obligation list shares the live, mutable {@code FaceObligation} objects, so a snapshot kept
+     * across an activation reports that activation's result rather than the state it was taken at.
+     */
+    public CommsSnapshot snapshot() {
+        return commsSystem.snapshot();
     }
 
     public TrustLevel getTrustLevel() {
