@@ -1,6 +1,6 @@
 #ignore the debug logs and output images
 logs
-
+.class
 output/robot_panel_images
 
 output/base_tiles
