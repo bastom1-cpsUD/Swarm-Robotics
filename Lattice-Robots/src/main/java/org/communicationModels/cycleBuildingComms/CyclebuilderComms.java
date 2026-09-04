@@ -399,6 +399,10 @@ public class CyclebuilderComms extends CommunicationSystem {
         // how the formation grows, so it is exempt rather than an exception.
         if (occupiesLatticeSite() && !checkAssignmentForCurrentPosition(pm)) {
             forwardRejectionUpstream(pm, false);
+            if(hasFailed()) {
+                //Since someone messaged me & I have given up, review if my observation of them to see if they could possibly be assigned an edge that has been previously marked as failed
+                reviewObservationForNewValidNeighbor(pm);
+            }
             log("-> assignment REJECTED by " + pm.getSenderId() + " (not my position)");
             return "Positioning Message from " + pm.getSenderId() + " (REJECTED, NOT MY POSITION)";
         }
@@ -429,6 +433,20 @@ public class CyclebuilderComms extends CommunicationSystem {
 
         // (3)/(4)
         return relayAlongTuple(pm);
+    }
+
+    private void reviewObservationForNewValidNeighbor(PositioningMessage pm) {
+        //TODO: HERE
+        int edgeID = pm.getAssignedOutgoingEdgeID();
+        HalfEdge edge = retrieveEdgeFromGraph(edgeID);
+        HalfEdge twin = edge.getTwin();
+
+        //Check if twin is a valid outgoing edge of mine; if so, mark the cycle back to unattempted from failed
+        CycleStatus cycleStatus = completedCycles.get(twin.getId());
+        if(cycleStatus != null && cycleStatus == CycleStatus.failed) {
+            log("-> observed neighbor " + pm.getSenderId() + " is now a valid candidate for edge " + twin.getId() + ", marking cycle back to unattempted");
+            completedCycles.put(twin.getId(), CycleStatus.unattempted);
+        }
     }
 
     /**
